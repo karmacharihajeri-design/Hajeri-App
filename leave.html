@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>रजेसाठी अर्ज</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar" style="background:var(--saffron);">
+    <h1>रजेसाठी अर्ज</h1>
+    <p id="userNameLbl"></p>
+    <p data-app-name style="font-size:10px;opacity:.8;"></p>
+  </div>
+
+  <div class="card">
+    <p style="font-size:12px;text-align:center;margin-top:0;">
+      रजेच्या अर्जाचा स्पष्ट फोटो किंवा PDF अपलोड करा व रजेच्या तारखा भरा —
+      नोंदवल्यानंतर त्या तारखांना हजेरीसाठी फोटो काढण्याची गरज राहणार नाही.
+    </p>
+    <label>रजा — From तारीख</label>
+    <input type="date" id="fromDate">
+    <label>रजा — To तारीख</label>
+    <input type="date" id="toDate">
+    <label>रजेच्या अर्जाचा फोटो / PDF</label>
+    <input type="file" id="proofInput" accept="image/*,application/pdf">
+    <button class="primary" id="submitBtn">रजेचा अर्ज सादर करा</button>
+    <div id="msgBox"></div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3 style="font-size:14px;margin-top:0;">माझ्या आधीच्या रजा</h3>
+    <div id="myLeavesList" style="font-size:12px;">लोड होत आहे...</div>
+  </div>
+
+  <div class="nav">
+    <a href="attendance.html">← हजेरीकडे परत जा</a>
+    <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="auth-guard.js"></script>
+<script src="settings-sync.js"></script>
+<script>
+const mobile = localStorage.getItem("mobileNumber");
+document.getElementById("userNameLbl").textContent = localStorage.getItem("name") || "";
+
+document.getElementById("submitBtn").onclick = async () => {
+  const fromDate = document.getElementById("fromDate").value;
+  const toDate = document.getElementById("toDate").value;
+  const fileInput = document.getElementById("proofInput");
+  const msgBox = document.getElementById("msgBox");
+  const btn = document.getElementById("submitBtn");
+
+  if (!fromDate || !toDate) {
+    msgBox.innerHTML = '<div class="msg err">कृपया दोन्ही तारखा भरा</div>';
+    return;
+  }
+  if (fromDate > toDate) {
+    msgBox.innerHTML = '<div class="msg err">From तारीख To तारखेनंतरची असू शकत नाही</div>';
+    return;
+  }
+  if (!fileInput.files[0]) {
+    msgBox.innerHTML = '<div class="msg err">कृपया रजेच्या अर्जाचा फोटो/PDF निवडा</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  msgBox.innerHTML = '<div class="msg ok">सादर करत आहे...</div>';
+
+  const file = fileInput.files[0];
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64 = reader.result.split(",")[1];
+    try {
+      const res = await Api.applyLeave({
+        mobileNumber: mobile, fromDate, toDate, proofBase64: base64, proofMime: file.type,
+      });
+      msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+      if (res.success) {
+        document.getElementById("proofInput").value = "";
+        document.getElementById("fromDate").value = "";
+        document.getElementById("toDate").value = "";
+        loadMyLeaves();
+      }
+    } catch (e) {
+      msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
+    }
+    btn.disabled = false;
+  };
+  reader.readAsDataURL(file);
+};
+
+async function loadMyLeaves() {
+  const box = document.getElementById("myLeavesList");
+  try {
+    const res = await Api.listMyLeaves(mobile);
+    if (res.success && res.leaves.length > 0) {
+      box.innerHTML = res.leaves.map(l =>
+        '<div class="staff-row"><div>' + l.fromDate + ' ते ' + l.toDate +
+        '<br><span style="color:#6b6a63;">स्थिती: ' + l.status + '</span></div></div>'
+      ).join("");
+    } else {
+      box.innerHTML = "अद्याप कोणतीही रजा नोंदवलेली नाही.";
+    }
+  } catch (e) {
+    box.innerHTML = "यादी आणता आली नाही.";
+  }
+}
+
+if (!mobile) window.location.href = "index.html";
+else loadMyLeaves();
+</script>
+</body>
+</html>

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>अॅडमिन पॅनल</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1 id="panelTitle">अॅडमिन पॅनल</h1>
+    <p data-app-name style="font-size:11px;opacity:.85;"></p>
+  </div>
+
+  <div class="card">
+    <h3 style="font-size:14px;margin-top:0;">नवीन स्टाफ जोडा</h3>
+    <label>नाव</label>
+    <input type="text" id="nameInput">
+    <label>मोबाईल नंबर</label>
+    <input type="tel" id="mobileInput" maxlength="10">
+    <label>नेमून दिलेले कामाचे ठिकाण</label>
+    <select id="locSelect"><option value="">— लोड होत आहे —</option></select>
+    <label>रोल</label>
+    <select id="roleInput">
+      <option value="user">User (कामगार)</option>
+      <option value="admin" id="adminRoleOption">Admin</option>
+    </select>
+    <button class="primary" id="addBtn">स्टाफ जोडा</button>
+    <div id="msgBox"></div>
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:14px;margin-top:0;">कर्मचाऱ्यासाठी सहाय्यक सुविधा</h3>
+    <p style="font-size:11px;color:#6b6a63;">
+      कामगाराच्या स्वतःच्या मोबाईलवर कॅमेरा/चेहरा-नोंदणीत अडचण येत असल्यास,
+      Admin/Developer स्वतःच्या डिव्हाइसवरून त्याची चेहरा-नोंदणी किंवा हजेरी
+      घेऊ शकतो (कामगार समोर उभा राहून).
+    </p>
+    <label>कामगाराचा मोबाईल नंबर</label>
+    <input type="tel" id="assistMobileInput" maxlength="10">
+    <button class="outline" id="assistEnrollBtn">👤 चेहरा नोंदणी करा (सहाय्यक)</button>
+    <button class="outline" id="assistAttendanceBtn">📸 हजेरी घ्या (सहाय्यक)</button>
+  </div>
+
+  <div class="nav" style="margin-top:20px;">
+    <a href="report.html">📄 हजेरी पत्रक तयार करा</a>
+    <a href="spot-assign.html" id="spotAssignLink" style="display:none;">📍 नवीन जागा असाइन करा</a>
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:14px;margin-top:0;">चेहरा-नोंदणी रीसेट</h3>
+    <p style="font-size:11px;color:#6b6a63;">
+      कर्मचाऱ्याची दाढी वाढल्याने, चष्मा घातल्याने किंवा इतर कारणाने चेहरा सतत
+      जुळत नसेल, तर इथून त्याची जुनी नोंदणी रद्द करा — पुढच्या लॉगिनला तो
+      पुन्हा (सर्व कोनांतून) चेहरा नोंदवू शकेल.
+    </p>
+    <label>कर्मचाऱ्याचा मोबाईल नंबर</label>
+    <input type="tel" id="resetMobileInput" maxlength="10">
+    <button class="outline" id="resetFaceBtn">चेहरा-नोंदणी रीसेट करा</button>
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:14px;margin-top:0;">डिव्हाइस-नोंदणी रीसेट</h3>
+    <p style="font-size:11px;color:#6b6a63;">
+      प्रत्येक मोबाईल नंबर पहिल्यांदा ज्या डिव्हाइस/ब्राउझरवरून लॉगिन होतो, तोच
+      "अधिकृत डिव्हाइस" म्हणून लॉक होतो — त्याच नंबरने दुसऱ्या डिव्हाइसवरून
+      लॉगिन करता येत नाही. कर्मचाऱ्याने नवीन मोबाईल घेतला किंवा जुना हरवला,
+      तर इथून त्याची जुनी डिव्हाइस-नोंदणी रद्द करा — पुढच्या लॉगिनला जे नवीन
+      डिव्हाइस वापरेल तेच लॉक होईल.
+    </p>
+    <label>कर्मचाऱ्याचा मोबाईल नंबर</label>
+    <input type="tel" id="resetDeviceInput" maxlength="10">
+    <button class="outline" id="resetDeviceBtn">डिव्हाइस-नोंदणी रीसेट करा</button>
+  </div>
+
+  <div id="devSettings" class="card" style="display:none; margin-top:20px;">
+    <h3 style="font-size:14px;margin-top:0;">Developer सेटिंग्ज</h3>
+    <label>संस्थेचे/अॅपचे नाव</label>
+    <input type="text" id="appNameInput">
+    <label>पत्ता</label>
+    <input type="text" id="addrInput">
+    <label>सकाळच्या हजेरीची वेळ (From)</label>
+    <input type="time" id="morningStartInput" value="09:00">
+    <label>सकाळच्या हजेरीची वेळ (To)</label>
+    <input type="time" id="morningEndInput" value="11:00">
+    <label>दुपारच्या हजेरीची वेळ (From)</label>
+    <input type="time" id="afternoonStartInput" value="15:30">
+    <label>दुपारच्या हजेरीची वेळ (To)</label>
+    <input type="time" id="afternoonEndInput" value="19:00">
+    <button class="outline" id="saveSettingsBtn">सेटिंग्ज सेव्ह करा</button>
+
+    <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px;">
+      <label>अॅपचा लोगो (इमेज निवडा)</label>
+      <input type="file" id="logoFileInput" accept="image/*">
+      <button class="outline" id="uploadLogoBtn">लोगो अपलोड करा</button>
+    </div>
+  </div>
+
+  <div id="holidaySection" class="card" style="display:none; margin-top:20px;">
+    <h3 style="font-size:14px;margin-top:0;">सुट्ट्यांची यादी (शासकीय/सार्वजनिक)</h3>
+    <p style="font-size:11px;color:#6b6a63;">
+      शनिवार-रविवार आपोआप साप्ताहिक सुट्टी धरली जाते. सण/शासकीय सुट्या इथून
+      जोडा — त्या दिवशी हजेरीसाठी फोटो काढण्याची गरज राहणार नाही व हजेरी
+      पत्रकातही आपोआप "सुट्टी" अशी नोंद होईल.
+    </p>
+    <label>तारीख</label>
+    <input type="date" id="holidayDateInput">
+    <label>सुट्टीचे नाव</label>
+    <input type="text" id="holidayNameInput" placeholder="उदा. दिवाळी, स्वातंत्र्य दिन">
+    <button class="outline" id="addHolidayBtn">सुट्टी जोडा</button>
+    <div id="holidayList" style="font-size:12px;margin-top:14px;">लोड होत आहे...</div>
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <h3 style="font-size:14px;margin-top:0;">कर्मचाऱ्यांचे रजा अर्ज</h3>
+    <p style="font-size:11px;color:#6b6a63;">
+      कामगार रजेच्या तारखेआधी कामावर परतल्यास इथून त्याच्या रजेच्या तारखा
+      (उदा. शेवटची तारीख कमी करून) बदलता येतील.
+    </p>
+    <div id="leaveList" style="font-size:12px;">लोड होत आहे...</div>
+  </div>
+
+  <div class="nav" style="margin-top:20px;">
+    <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
+    <button class="danger" onclick="doExit()" style="width:auto;padding:8px 16px;">बाहेर पडा (Exit)</button>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="auth-guard.js"></script>
+<script src="settings-sync.js"></script>
+<script>
+const role = localStorage.getItem("role");
+document.getElementById("panelTitle").textContent = role === "developer" ? "डेव्हलपर पॅनल" : "अॅडमिन पॅनल";
+if (role === "developer") {
+  document.getElementById("devSettings").style.display = "block";
+  document.getElementById("spotAssignLink").style.display = "inline";
+  document.getElementById("holidaySection").style.display = "block";
+  loadHolidays();
+} else {
+  // Admin (Developer नाही) ला फक्त "User" रोलच तयार करता यावा — Admin पर्याय दिसणारच नाही
+  document.getElementById("adminRoleOption").remove();
+}
+if (!localStorage.getItem("mobileNumber")) window.location.href = "index.html";
+
+async function loadLocationOptions() {
+  const sel = document.getElementById("locSelect");
+  try {
+    const res = await Api.listLocations();
+    if (res.success && res.locations.length > 0) {
+      sel.innerHTML = res.locations
+        .map(l => '<option value="' + l.locationId + '">' + l.name + ' (त्रिज्या ' + l.radiusMeters + ' मी.)</option>')
+        .join("");
+    } else {
+      sel.innerHTML = '<option value="">— आधी "नवीन जागा असाइन करा" वापरा —</option>';
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">यादी आणता आली नाही</option>';
+  }
+}
+loadLocationOptions();
+loadLeaves();
+
+// सध्याच्या सेटिंग्ज Developer फॉर्ममध्ये आपोआप भराव्यात (settings-sync.js लोड झाल्यावर)
+setTimeout(() => {
+  const s = window.__appSettings;
+  if (s) {
+    if (s.AppName) document.getElementById("appNameInput").value = s.AppName;
+    if (s.OrgAddress) document.getElementById("addrInput").value = s.OrgAddress;
+    if (s.MorningStartTime) document.getElementById("morningStartInput").value = s.MorningStartTime;
+    if (s.MorningEndTime) document.getElementById("morningEndInput").value = s.MorningEndTime;
+    if (s.AfternoonStartTime) document.getElementById("afternoonStartInput").value = s.AfternoonStartTime;
+    if (s.AfternoonEndTime) document.getElementById("afternoonEndInput").value = s.AfternoonEndTime;
+  }
+}, 800);
+
+document.getElementById("assistEnrollBtn").onclick = () => {
+  const mobile = document.getElementById("assistMobileInput").value.trim();
+  if (mobile.length !== 10) { alert("कृपया योग्य १० अंकी मोबाईल नंबर टाका"); return; }
+  window.location.href = "enroll.html?mobile=" + encodeURIComponent(mobile);
+};
+
+document.getElementById("assistAttendanceBtn").onclick = () => {
+  const mobile = document.getElementById("assistMobileInput").value.trim();
+  if (mobile.length !== 10) { alert("कृपया योग्य १० अंकी मोबाईल नंबर टाका"); return; }
+  window.location.href = "attendance.html?mobile=" + encodeURIComponent(mobile);
+};
+
+document.getElementById("addBtn").onclick = async () => {
+  const msgBox = document.getElementById("msgBox");
+  const locationId = document.getElementById("locSelect").value;
+  if (!locationId) {
+    msgBox.innerHTML = '<div class="msg err">कृपया कामाचे ठिकाण निवडा</div>';
+    return;
+  }
+  const res = await Api.addStaff({
+    mobileNumber: document.getElementById("mobileInput").value.trim(),
+    name: document.getElementById("nameInput").value.trim(),
+    role: document.getElementById("roleInput").value,
+    locationId,
+  });
+  msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+};
+
+document.getElementById("resetFaceBtn").onclick = async () => {
+  const mobile = document.getElementById("resetMobileInput").value.trim();
+  const msgBox = document.getElementById("msgBox");
+  if (mobile.length !== 10) {
+    msgBox.innerHTML = '<div class="msg err">कृपया योग्य १० अंकी मोबाईल नंबर टाका</div>';
+    return;
+  }
+  const res = await Api.resetFaceEnrollment(mobile);
+  msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+};
+
+document.getElementById("resetDeviceBtn").onclick = async () => {
+  const mobile = document.getElementById("resetDeviceInput").value.trim();
+  const msgBox = document.getElementById("msgBox");
+  if (mobile.length !== 10) {
+    msgBox.innerHTML = '<div class="msg err">कृपया योग्य १० अंकी मोबाईल नंबर टाका</div>';
+    return;
+  }
+  const res = await Api.resetDevice(mobile);
+  msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+};
+
+document.getElementById("saveSettingsBtn").onclick = async () => {
+  const res = await Api.updateSettings({
+    AppName: document.getElementById("appNameInput").value,
+    OrgAddress: document.getElementById("addrInput").value,
+    MorningStartTime: document.getElementById("morningStartInput").value,
+    MorningEndTime: document.getElementById("morningEndInput").value,
+    AfternoonStartTime: document.getElementById("afternoonStartInput").value,
+    AfternoonEndTime: document.getElementById("afternoonEndInput").value,
+  });
+  document.getElementById("msgBox").innerHTML =
+    '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+};
+
+/* ---------- सुट्ट्यांची यादी (फक्त Developer) ---------- */
+async function loadHolidays() {
+  const box = document.getElementById("holidayList");
+  try {
+    const res = await Api.listHolidays();
+    if (res.success && res.holidays.length > 0) {
+      box.innerHTML = res.holidays.map(h =>
+        '<div class="staff-row"><div><b>' + h.date + '</b> — ' + h.name + '</div>' +
+        '<button class="danger" style="width:auto;padding:4px 10px;margin:0;" onclick="removeHoliday(' + h.rowIndex + ')">काढा</button></div>'
+      ).join("");
+    } else {
+      box.innerHTML = "अद्याप कोणतीही सुट्टी जोडलेली नाही.";
+    }
+  } catch (e) {
+    box.innerHTML = "यादी आणता आली नाही.";
+  }
+}
+
+document.getElementById("addHolidayBtn").onclick = async () => {
+  const date = document.getElementById("holidayDateInput").value;
+  const name = document.getElementById("holidayNameInput").value.trim();
+  if (!date || !name) { alert("कृपया तारीख व सुट्टीचे नाव दोन्ही भरा"); return; }
+  const res = await Api.addHoliday({ date, name });
+  if (res.success) {
+    document.getElementById("holidayNameInput").value = "";
+    document.getElementById("holidayDateInput").value = "";
+    loadHolidays();
+  } else {
+    alert(res.message);
+  }
+};
+
+async function removeHoliday(rowIndex) {
+  if (!confirm("ही सुट्टी काढायची आहे का?")) return;
+  const res = await Api.deleteHoliday(rowIndex);
+  if (res.success) loadHolidays(); else alert(res.message);
+}
+
+/* ---------- रजा अर्ज (Admin + Developer दोघेही पाहू/बदलू शकतात) ---------- */
+async function loadLeaves() {
+  const box = document.getElementById("leaveList");
+  try {
+    const res = await Api.listAllLeaves();
+    if (!res.success) { box.innerHTML = res.message; return; }
+    if (res.leaves.length === 0) { box.innerHTML = "अद्याप कोणताही रजा अर्ज नाही."; return; }
+    box.innerHTML = res.leaves.map(l => `
+      <div class="staff-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <div><b>${l.name}</b> (${l.mobile}) — स्थिती: ${l.status}</div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="date" value="${l.fromDate}" id="lf_${l.rowIndex}" style="flex:1;padding:6px;">
+          <input type="date" value="${l.toDate}" id="lt_${l.rowIndex}" style="flex:1;padding:6px;">
+          <button class="outline" style="width:auto;padding:6px 10px;margin:0;" onclick="saveLeaveEdit(${l.rowIndex})">सेव्ह</button>
+        </div>
+        ${l.proofUrl ? '<a href="' + l.proofUrl + '" target="_blank" style="font-size:11px;">📎 अर्जाचा पुरावा पाहा</a>' : ''}
+      </div>
+    `).join("");
+  } catch (e) {
+    box.innerHTML = "यादी आणता आली नाही.";
+  }
+}
+
+async function saveLeaveEdit(rowIndex) {
+  const fromDate = document.getElementById("lf_" + rowIndex).value;
+  const toDate = document.getElementById("lt_" + rowIndex).value;
+  if (!fromDate || !toDate || fromDate > toDate) { alert("कृपया योग्य From-To तारखा निवडा"); return; }
+  const res = await Api.updateLeaveDates({ rowIndex, fromDate, toDate });
+  alert(res.message);
+  if (res.success) loadLeaves();
+}
+
+document.getElementById("uploadLogoBtn").onclick = async () => {
+  const fileInput = document.getElementById("logoFileInput");
+  const msgBox = document.getElementById("msgBox");
+  if (!fileInput.files[0]) {
+    msgBox.innerHTML = '<div class="msg err">कृपया लोगो इमेज निवडा</div>';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64 = reader.result.split(",")[1];
+    msgBox.innerHTML = '<div class="msg ok">अपलोड करत आहे...</div>';
+    const res = await Api.uploadLogo(base64);
+    msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+  };
+  reader.readAsDataURL(fileInput.files[0]);
+};
+</script>
+</body>
+</html>

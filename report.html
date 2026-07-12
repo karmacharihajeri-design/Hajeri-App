@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>हजेरी पत्रक</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>हजेरी पत्रक तयार करा</h1>
+    <p data-app-name style="font-size:11px;"></p>
+  </div>
+
+  <div class="card">
+    <label>From तारीख</label>
+    <input type="date" id="fromDate">
+    <label>To तारीख</label>
+    <input type="date" id="toDate">
+
+    <label>कोणासाठी?</label>
+    <select id="targetSelect">
+      <option value="all">सर्व कर्मचारी (एकत्र)</option>
+      <option value="single">एका कर्मचाऱ्यासाठी</option>
+    </select>
+    <div id="mobileFieldWrap" style="display:none;">
+      <label>कर्मचाऱ्याचा मोबाईल नंबर</label>
+      <input type="tel" id="targetMobile" maxlength="10">
+    </div>
+
+    <button class="primary" id="genBtn">PDF तयार करा</button>
+    <div id="msgBox"></div>
+  </div>
+
+  <div class="card" id="resultBox" style="display:none; margin-top:16px;">
+    <h3 style="font-size:14px;margin-top:0;">तयार झालेली PDF</h3>
+    <button class="primary" id="saveBtn">💾 डिव्हाइसवर सेव्ह करा</button>
+    <button class="outline" id="printBtn">🖨️ प्रिंट करा</button>
+    <p style="font-size:11px;color:#6b6a63;margin-top:10px;">
+      ही PDF आपोआप Google Drive वरही सुरक्षित ठेवली आहे — पुढेही कधीही तिथून उघडता येईल.
+    </p>
+    <a id="driveLink" href="#" target="_blank" style="font-size:12px;">Drive वर पाहा →</a>
+  </div>
+
+  <div class="nav" style="margin-top:20px;">
+    <a href="admin.html">← अॅडमिन पॅनलला परत जा</a>
+    <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="auth-guard.js"></script>
+<script src="settings-sync.js"></script>
+<script>
+document.getElementById("targetSelect").onchange = (e) => {
+  document.getElementById("mobileFieldWrap").style.display =
+    e.target.value === "single" ? "block" : "none";
+};
+
+let lastPdfBlob = null;
+let lastPdfFileName = "hajeri-patrak.pdf";
+
+document.getElementById("genBtn").onclick = async () => {
+  const from = document.getElementById("fromDate").value;
+  const to = document.getElementById("toDate").value;
+  const target = document.getElementById("targetSelect").value;
+  const mobile = document.getElementById("targetMobile").value.trim();
+  const msgBox = document.getElementById("msgBox");
+  const genBtn = document.getElementById("genBtn");
+
+  if (!from || !to) {
+    msgBox.innerHTML = '<div class="msg err">कृपया From आणि To तारीख निवडा</div>';
+    return;
+  }
+  if (target === "single" && mobile.length !== 10) {
+    msgBox.innerHTML = '<div class="msg err">कृपया कर्मचाऱ्याचा योग्य मोबाईल नंबर टाका</div>';
+    return;
+  }
+
+  genBtn.disabled = true;
+  msgBox.innerHTML = '<div class="msg ok">PDF तयार करत आहे — यास काही सेकंद लागू शकतात...</div>';
+  document.getElementById("resultBox").style.display = "none";
+
+  try {
+    const res = await Api.generateReport({
+      mobileNumber: target === "all" ? "all" : mobile,
+      fromDate: from,
+      toDate: to,
+    });
+
+    if (res.success && res.pdfBase64) {
+      msgBox.innerHTML = '<div class="msg ok">PDF तयार झाली ✓</div>';
+
+      // Base64 → Blob (डिव्हाइसवर सेव्ह/प्रिंट करण्यासाठी)
+      const byteChars = atob(res.pdfBase64);
+      const byteNumbers = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+      const byteArray = new Uint8Array(byteNumbers);
+      lastPdfBlob = new Blob([byteArray], { type: "application/pdf" });
+      lastPdfFileName = res.pdfFileName || "hajeri-patrak.pdf";
+
+      document.getElementById("driveLink").href = res.pdfUrl;
+      document.getElementById("resultBox").style.display = "block";
+    } else {
+      msgBox.innerHTML = '<div class="msg err">' + (res.message || "PDF तयार करता आली नाही") + '</div>';
+    }
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
+  }
+  genBtn.disabled = false;
+};
+
+/** डिव्हाइस/PC वर फोल्डर निवडून सेव्ह करणे — शक्य असल्यास File System Access API
+ *  (Chrome/Edge) वापरून "Save As" डायलॉग दाखवतो; नसल्यास सामान्य डाउनलोड करतो
+ *  (ब्राउझर सेटिंगमध्ये "डाउनलोड करण्यापूर्वी ठिकाण विचारा" सुरू असल्यास तिथेही
+ *  फोल्डर निवडण्याचा पर्याय मिळतो). */
+function isIOS_() {
+  return /iP(hone|od|ad)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1); // iPadOS
+}
+
+document.getElementById("saveBtn").onclick = async () => {
+  if (!lastPdfBlob) return;
+  const msgBox = document.getElementById("msgBox");
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: lastPdfFileName,
+        types: [{ description: "PDF फाईल", accept: { "application/pdf": [".pdf"] } }],
+      });
+      const writable = await handle.createWritable();
+      await writable.write(lastPdfBlob);
+      await writable.close();
+      msgBox.innerHTML = '<div class="msg ok">फाईल निवडलेल्या ठिकाणी सेव्ह झाली ✓</div>';
+      return;
+    } catch (e) {
+      if (e.name === "AbortError") return; // यूजरने रद्द केले
+      // पुढे सामान्य डाउनलोड पद्धतीकडे वळू
+    }
+  }
+
+  // iOS Safari वर blob "download" attribute अनेकदा नुसती PDF नवीन टॅबमध्ये
+  // उघडते, प्रत्यक्ष सेव्ह होत नाही — त्यामुळे तिथे स्पष्ट सूचना देऊन नवीन
+  // टॅबमध्ये उघडा, जिथून Share (□↑) बटणाने "Save to Files" करता येईल
+  if (isIOS_()) {
+    const url = URL.createObjectURL(lastPdfBlob);
+    window.open(url, "_blank");
+    msgBox.innerHTML = '<div class="msg ok">PDF नवीन टॅबमध्ये उघडली — वरच्या Share (□↑) बटणावर टॅप करून "Save to Files" निवडा. (किंवा खालील "Drive वर पाहा" लिंकवरून थेट सेव्ह करू शकता.)</div>';
+    return;
+  }
+
+  // सामान्य डाउनलोड (Android Chrome / Desktop Chrome-Edge-Firefox)
+  const url = URL.createObjectURL(lastPdfBlob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = lastPdfFileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+  msgBox.innerHTML = '<div class="msg ok">डाउनलोड सुरू झाले — फोल्डर निवडण्याचा पर्याय न दिसल्यास ब्राउझर सेटिंगमध्ये "डाउनलोड करण्यापूर्वी ठिकाण विचारा" सुरू करा.</div>';
+};
+
+/** प्रिंट — लपवलेल्या iframe मध्ये PDF लोड करून थेट प्रिंट डायलॉग उघडते.
+ *  (आधीची पद्धत नवीन टॅबमध्ये PDF-व्ह्यूअर plugin लोड होण्याआधीच print()
+ *  कॉल करत होती, त्यामुळे अनेकदा प्रिंट डायलॉगच उघडत नव्हता.) */
+document.getElementById("printBtn").onclick = () => {
+  if (!lastPdfBlob) return;
+  const msgBox = document.getElementById("msgBox");
+  const url = URL.createObjectURL(lastPdfBlob);
+
+  // iOS Safari मध्ये iframe मधून PDF प्रिंट करणे विश्वासार्ह नाही —
+  // तिथे नवीन टॅबमध्ये उघडून Share मेनूतील Print पर्याय वापरायला सांगा
+  if (isIOS_()) {
+    window.open(url, "_blank");
+    msgBox.innerHTML = '<div class="msg ok">PDF नवीन टॅबमध्ये उघडली — वरच्या Share (□↑) बटणातून "Print" निवडा.</div>';
+    return;
+  }
+
+  const iframe = document.createElement("iframe");
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.src = url;
+
+  iframe.onload = () => {
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (e) {
+        window.open(url, "_blank");
+        msgBox.innerHTML = '<div class="msg err">आपोआप प्रिंट डायलॉग उघडता आला नाही — PDF नवीन टॅबमध्ये उघडली, तिथून प्रिंट आयकॉन वापरा.</div>';
+      }
+    }, 400);
+  };
+  document.body.appendChild(iframe);
+
+  setTimeout(() => {
+    if (iframe.parentNode) document.body.removeChild(iframe);
+    URL.revokeObjectURL(url);
+  }, 60000);
+};
+</script>
+</body>
+</html>

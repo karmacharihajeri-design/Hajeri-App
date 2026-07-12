@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>रोजची हजेरी</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div class="seal" id="sealDefault">GP</div>
+    <img id="logoImg" class="logo-img" style="display:none;" alt="Logo">
+    <h1 data-app-name>ग्रामपंचायत हजेरी अॅप</h1>
+  </div>
+
+  <div class="card">
+    <label>मोबाईल नंबर</label>
+    <input type="tel" id="mobileInput" placeholder="९८XXXXXXXX" maxlength="10" autofocus>
+    <div id="nameHint" style="font-size:12px;color:var(--green-mid);font-weight:600;min-height:16px;margin-top:-8px;margin-bottom:8px;"></div>
+    <div id="msgBox"></div>
+    <button class="primary" id="loginBtn">लॉगिन करा</button>
+  </div>
+
+  <div class="nav" style="margin-top:16px; justify-content:center;">
+    <button class="danger" id="exitBtn" style="width:auto;padding:8px 20px;">बाहेर पडा (Exit)</button>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="settings-sync.js"></script>
+<script src="device.js"></script>
+<script>
+let nameLookupTimer = null;
+document.getElementById("mobileInput").addEventListener("input", (e) => {
+  const nameHint = document.getElementById("nameHint");
+  const val = e.target.value.trim();
+  nameHint.textContent = "";
+  clearTimeout(nameLookupTimer);
+  if (val.length !== 10 || typeof Api === "undefined") return;
+  nameLookupTimer = setTimeout(async () => {
+    try {
+      const res = await Api.lookupName(val);
+      nameHint.textContent = res.success ? "👋 " + res.name : "";
+    } catch (err) {
+      // शांतपणे दुर्लक्ष करा — फक्त सोयीसाठीची सुविधा आहे, आवश्यक नाही
+    }
+  }, 400);
+});
+
+document.getElementById("loginBtn").onclick = async () => {
+  const mobile = document.getElementById("mobileInput").value.trim();
+  const msgBox = document.getElementById("msgBox");
+  if (mobile.length !== 10) {
+    msgBox.innerHTML = '<div class="msg err">कृपया योग्य १० अंकी मोबाईल नंबर टाका</div>';
+    return;
+  }
+  msgBox.innerHTML = '<div class="msg ok">तपासत आहे...</div>';
+  try {
+    if (typeof Api === "undefined") {
+      throw new Error("अॅपच्या फाईल्स नीट लोड झाल्या नाहीत (api.js सापडत नाही)");
+    }
+    const deviceId = getDeviceId();
+    const res = await Api.login(mobile, deviceId);
+    if (res.success) {
+      localStorage.setItem("mobileNumber", mobile);
+      localStorage.setItem("role", res.role);
+      localStorage.setItem("name", res.name);
+      localStorage.setItem("locationId", res.locationId);
+      localStorage.setItem("faceEnrolled", res.faceEnrolled ? "1" : "0");
+
+      if (res.role === "user") {
+        window.location.href = res.faceEnrolled === true ? "attendance.html" : "enroll.html";
+      } else {
+        window.location.href = "admin.html";
+      }
+    } else {
+      msgBox.innerHTML = '<div class="msg err">' + res.message + '</div>';
+    }
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">बॅकएंडशी जोडता आले नाही: ' + e.message + '</div>';
+  }
+};
+document.getElementById("mobileInput").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") document.getElementById("loginBtn").click();
+});
+
+/** लॉगिन स्क्रीनवरून बाहेर पडणे — शक्य असल्यास टॅब/विंडो बंद करते.
+ *  (स्क्रिप्टने उघडलेली विंडो नसेल तर ब्राउझर सुरक्षिततेमुळे बंद होणार
+ *  नाही — तसं झाल्यास यूजरला मॅन्युअली बंद करावी लागेल, हे अपेक्षित आहे.) */
+document.getElementById("exitBtn").onclick = () => {
+  window.close();
+  setTimeout(() => {
+    document.getElementById("msgBox").innerHTML =
+      '<div class="msg ok">तुम्ही आता ब्राउझर टॅब मॅन्युअली बंद करू शकता.</div>';
+  }, 300);
+};
+</script>
+</body>
+</html>

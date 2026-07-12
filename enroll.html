@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>चेहरा नोंदणी</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: face-api.js (चेहरा-ओळख इंजिन) लोड होऊ शकले नाही — इंटरनेट कनेक्शन तपासा</div>')"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar" style="background:var(--maroon);">
+    <h1>चेहरा नोंदणी</h1>
+    <p id="userNameLbl"></p>
+    <p data-app-name style="font-size:10px;opacity:.8;"></p>
+  </div>
+
+  <p style="font-size:12px;text-align:center;">
+    दाढी वाढली, चष्मा घातला किंवा कोन बदलला तरी ओळख होण्यासाठी
+    <b>५ वेगवेगळ्या पोझमध्ये</b> चेहरा नोंदवला जाईल. सूचनेप्रमाणे मान वळवा
+    आणि प्रत्येक वेळी "हा कोन कॅप्चर करा" दाबा.
+  </p>
+
+  <div style="text-align:center;margin-top:10px;">
+    <span id="progressLbl" style="font-weight:700;color:var(--green-deep);">पायरी १ / ५</span>
+  </div>
+  <div id="poseInstruction" style="text-align:center;font-size:16px;font-weight:700;margin-top:6px;color:var(--maroon);">
+    सरळ समोर पहा
+  </div>
+
+  <div class="video-frame"><video id="video" autoplay muted playsinline></video></div>
+  <div class="face-status" id="faceStatus">कॅमेरा सुरू होत आहे...</div>
+  <div id="msgBox"></div>
+
+  <button class="primary" id="captureBtn" disabled>हा कोन कॅप्चर करा</button>
+  <button class="primary" id="finishBtn" style="display:none;">चेहरा नोंदणी पूर्ण करा</button>
+
+  <div class="nav">
+    <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
+    <button class="danger" onclick="doExit()" style="width:auto;padding:8px 16px;">बाहेर पडा</button>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="auth-guard.js"></script>
+<script src="settings-sync.js"></script>
+<script src="face-utils.js"></script>
+<script>
+const loggedInMobile = localStorage.getItem("mobileNumber");
+const loggedInRole = localStorage.getItem("role");
+const urlParams = new URLSearchParams(window.location.search);
+const assistedMobile = urlParams.get("mobile");
+const isAssisted = !!assistedMobile && (loggedInRole === "admin" || loggedInRole === "developer");
+const mobile = isAssisted ? assistedMobile : loggedInMobile;
+
+const video = document.getElementById("video");
+const faceStatus = document.getElementById("faceStatus");
+const msgBox = document.getElementById("msgBox");
+const captureBtn = document.getElementById("captureBtn");
+const finishBtn = document.getElementById("finishBtn");
+const progressLbl = document.getElementById("progressLbl");
+const poseInstruction = document.getElementById("poseInstruction");
+
+const POSES = [
+  "सरळ समोर पहा",
+  "हळूच डावीकडे वळा",
+  "हळूच उजवीकडे वळा",
+  "थोडं वर पहा",
+  "थोडं खाली पहा",
+];
+
+let poseIndex = 0;
+let currentDescriptor = null;
+const collectedDescriptors = [];
+
+document.getElementById("userNameLbl").textContent = isAssisted
+  ? "साहाय्यक नोंदणी — मोबाईल: " + mobile
+  : (localStorage.getItem("name") || "");
+
+async function init() {
+  faceStatus.textContent = "मॉडेल लोड होत आहे...";
+  try {
+    await loadFaceModels();
+    await startCamera(video);
+    updatePoseUI();
+    detectLoop();
+  } catch (e) {
+    faceStatus.textContent = e.message;
+    faceStatus.className = "face-status face-no";
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "outline";
+    retryBtn.textContent = "📷 कॅमेरा पुन्हा सुरू करा";
+    retryBtn.onclick = init;
+    msgBox.innerHTML = "";
+    msgBox.appendChild(retryBtn);
+  }
+}
+
+function updatePoseUI() {
+  progressLbl.textContent = "पायरी " + (poseIndex + 1) + " / " + POSES.length;
+  poseInstruction.textContent = POSES[poseIndex];
+}
+
+async function detectLoop() {
+  const descriptor = await detectFaceDescriptor(video);
+  if (descriptor) {
+    currentDescriptor = descriptor;
+    faceStatus.textContent = "चेहरा ओळखला ✓ — आता कॅप्चर करा";
+    faceStatus.className = "face-status face-ok";
+    captureBtn.disabled = false;
+  } else {
+    currentDescriptor = null;
+    faceStatus.textContent = "चेहरा शोधत आहे...";
+    faceStatus.className = "face-status face-no";
+    captureBtn.disabled = true;
+  }
+  setTimeout(detectLoop, 500);
+}
+
+captureBtn.onclick = () => {
+  if (!currentDescriptor) return;
+  collectedDescriptors.push(Array.from(currentDescriptor));
+  msgBox.innerHTML = '<div class="msg ok">' + POSES[poseIndex] + ' — कॅप्चर झाले ✓</div>';
+
+  poseIndex++;
+  if (poseIndex < POSES.length) {
+    updatePoseUI();
+    captureBtn.disabled = true;
+  } else {
+    // सर्व ५ कोन झाले
+    poseInstruction.textContent = "सर्व कोन कॅप्चर झाले ✓";
+    progressLbl.textContent = POSES.length + " / " + POSES.length;
+    captureBtn.style.display = "none";
+    finishBtn.style.display = "block";
+  }
+};
+
+finishBtn.onclick = async () => {
+  finishBtn.disabled = true;
+  msgBox.innerHTML = '<div class="msg ok">नोंदवत आहे...</div>';
+  try {
+    const res = await Api.enrollFace(mobile, collectedDescriptors);
+    if (res.success) {
+      if (!isAssisted) localStorage.setItem("faceEnrolled", "1");
+      msgBox.innerHTML = '<div class="msg ok">चेहरा यशस्वीरित्या नोंदवला!</div>';
+      setTimeout(() => {
+        window.location.href = isAssisted ? "admin.html" : "attendance.html";
+      }, 1200);
+    } else {
+      msgBox.innerHTML = '<div class="msg err">' + res.message + '</div>';
+      finishBtn.disabled = false;
+    }
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
+    finishBtn.disabled = false;
+  }
+};
+
+if (!mobile) window.location.href = "index.html";
+else init();
+</script>
+</body>
+</html>

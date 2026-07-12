@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>हजेरी — Check-In/Out</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: face-api.js (चेहरा-ओळख इंजिन) लोड होऊ शकले नाही — इंटरनेट कनेक्शन तपासा</div>')"></script>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar" style="background:var(--maroon);">
+    <h1>हजेरी — सकाळ / दुपार</h1>
+    <p id="userNameLbl"></p>
+    <p data-app-name style="font-size:10px;opacity:.8;"></p>
+  </div>
+
+  <div id="dayStatusBox" class="msg ok" style="display:none;font-size:14px;text-align:center;font-weight:700;"></div>
+
+  <div id="workingUI">
+    <div id="gpsBox" class="msg ok">GPS तपासत आहे...</div>
+    <button class="outline" id="gpsRetryBtn" style="display:none;">📍 GPS पुन्हा मिळवा</button>
+
+    <div class="video-frame"><video id="video" autoplay muted playsinline></video></div>
+    <div class="face-status" id="faceStatus">कॅमेरा सुरू होत आहे...</div>
+    <button class="outline" id="camRetryBtn" style="display:none;">📷 कॅमेरा पुन्हा सुरू करा</button>
+    <div id="msgBox"></div>
+
+    <button class="primary" id="morningBtn" disabled>🌅 सकाळची हजेरी</button>
+    <div id="morningWindowLbl" style="font-size:11px;text-align:center;color:#6b6a63;margin:4px 0 0;"></div>
+
+    <button class="primary" id="afternoonBtn" disabled style="margin-top:16px;">🌇 दुपारची हजेरी</button>
+    <div id="afternoonWindowLbl" style="font-size:11px;text-align:center;color:#6b6a63;margin:4px 0 0;"></div>
+  </div>
+
+  <div class="nav">
+    <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
+    <button class="danger" onclick="doExit()" style="width:auto;padding:8px 16px;">बाहेर पडा</button>
+  </div>
+  <div class="nav" style="margin-top:8px;">
+    <a href="leave.html">🗓️ रजेसाठी अर्ज</a>
+    <a href="admin.html">Admin →</a>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही — फोल्डर रचना/पाथ तपासा</div>')"></script>
+<script src="auth-guard.js"></script>
+<script src="settings-sync.js"></script>
+<script src="face-utils.js"></script>
+<script src="geo.js"></script>
+<script>
+const loggedInMobile = localStorage.getItem("mobileNumber");
+const loggedInRole = localStorage.getItem("role");
+
+// URL मध्ये ?mobile=... दिलं असेल आणि लॉगिन Admin/Developer असेल, तरच
+// "सहाय्यक हजेरी" (दुसऱ्या कामगारासाठी हजेरी घेणे) सक्रिय होते
+const urlParams = new URLSearchParams(window.location.search);
+const assistedMobile = urlParams.get("mobile");
+const isAssisted = !!assistedMobile && (loggedInRole === "admin" || loggedInRole === "developer");
+const mobile = isAssisted ? assistedMobile : loggedInMobile;
+
+const video = document.getElementById("video");
+const faceStatus = document.getElementById("faceStatus");
+const msgBox = document.getElementById("msgBox");
+const gpsBox = document.getElementById("gpsBox");
+const morningBtn = document.getElementById("morningBtn");
+const afternoonBtn = document.getElementById("afternoonBtn");
+
+let currentDescriptor = null;
+let enrolledDescriptors = null;
+let currentCoords = null;
+let faceMatched = false;
+let dayStatus = null;
+
+if (isAssisted) {
+  document.getElementById("userNameLbl").textContent = "साहाय्यक हजेरी — मोबाईल: " + mobile;
+  document.querySelector(".topbar").style.background = "var(--saffron)";
+} else {
+  document.getElementById("userNameLbl").textContent = localStorage.getItem("name") || "";
+}
+
+/** आजचा दिवस सुट्टी/रजा/नेहमीचा कामाचा दिवस आहे का हे तपासते.
+ *  सुट्टी/रजा असल्यास कॅमेरा/GPS सुरूच केला जात नाही. */
+async function loadDayStatus() {
+  const res = await Api.getTodayStatus(mobile);
+  dayStatus = res;
+  const box = document.getElementById("dayStatusBox");
+
+  if (res.dayType === "holiday") {
+    box.style.display = "block";
+    box.textContent = "🎉 आज सुट्टी आहे: " + res.label + " — हजेरीसाठी फोटो काढण्याची गरज नाही";
+    document.getElementById("workingUI").style.display = "none";
+    return false;
+  }
+  if (res.dayType === "leave") {
+    box.style.display = "block";
+    box.textContent = "🗓️ " + res.label + " — हजेरीसाठी फोटो काढण्याची गरज नाही";
+    document.getElementById("workingUI").style.display = "none";
+    return false;
+  }
+
+  document.getElementById("morningWindowLbl").textContent =
+    "वेळ: " + res.morningWindow[0] + " ते " + res.morningWindow[1];
+  document.getElementById("afternoonWindowLbl").textContent =
+    "वेळ: " + res.afternoonWindow[0] + " ते " + res.afternoonWindow[1];
+  return true;
+}
+
+function withinWindowNow_(winArr) {
+  const now = new Date();
+  const [sh, sm] = winArr[0].split(":").map(Number);
+  const [eh, em] = winArr[1].split(":").map(Number);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return nowMin >= (sh * 60 + sm) && nowMin <= (eh * 60 + em);
+}
+
+/** दोन्ही बटणांची सक्रिय/निष्क्रिय स्थिती — वेळ, चेहरा-जुळणी व GPS यावर आधारित */
+function updateButtonStates() {
+  if (!dayStatus || dayStatus.dayType !== "working") return;
+
+  if (dayStatus.morningDone) {
+    morningBtn.textContent = "✅ सकाळची हजेरी झाली";
+    morningBtn.disabled = true;
+  } else {
+    const inWindow = withinWindowNow_(dayStatus.morningWindow);
+    morningBtn.disabled = !(inWindow && faceMatched && !!currentCoords);
+    morningBtn.textContent = inWindow ? "🌅 सकाळची हजेरी" : "🌅 सकाळच्या हजेरीची वेळ नाही";
+  }
+
+  if (dayStatus.afternoonDone) {
+    afternoonBtn.textContent = "✅ दुपारची हजेरी झाली";
+    afternoonBtn.disabled = true;
+  } else {
+    const inWindow = withinWindowNow_(dayStatus.afternoonWindow);
+    afternoonBtn.disabled = !(inWindow && faceMatched && !!currentCoords);
+    afternoonBtn.textContent = inWindow ? "🌇 दुपारची हजेरी" : "🌇 दुपारच्या हजेरीची वेळ नाही";
+  }
+}
+setInterval(updateButtonStates, 15000); // वेळेची कक्षा ओलांडली/सुरू झाली की बटण आपोआप अपडेट व्हावे
+
+async function tryGetGps() {
+  gpsBox.className = "msg ok";
+  gpsBox.textContent = "GPS तपासत आहे...";
+  document.getElementById("gpsRetryBtn").style.display = "none";
+  try {
+    const coords = await getCurrentPosition();
+    currentCoords = coords;
+    gpsBox.textContent = "लोकेशन मिळाले ✓ (अचूकता: " + Math.round(coords.accuracy) + " मी.)";
+    updateButtonStates();
+  } catch (e) {
+    gpsBox.className = "msg err";
+    gpsBox.textContent = e.message;
+    document.getElementById("gpsRetryBtn").style.display = "block";
+  }
+}
+
+async function tryStartCamera() {
+  document.getElementById("camRetryBtn").style.display = "none";
+  try {
+    await loadFaceModels();
+    await startCamera(video);
+    faceStatus.textContent = "चेहरा शोधत आहे...";
+    faceStatus.className = "face-status face-no";
+    detectLoop();
+  } catch (e) {
+    faceStatus.textContent = e.message;
+    faceStatus.className = "face-status face-no";
+    document.getElementById("camRetryBtn").style.display = "block";
+  }
+}
+
+document.getElementById("gpsRetryBtn").onclick = tryGetGps;
+document.getElementById("camRetryBtn").onclick = tryStartCamera;
+
+async function init() {
+  const workingDay = await loadDayStatus();
+  if (!workingDay) return; // सुट्टी/रजा — पुढे कॅमेरा/GPS सुरू करायची गरज नाही
+
+  const res = await Api.getFaceDescriptor(mobile);
+  if (!res.success || !res.descriptors || res.descriptors.length === 0) {
+    window.location.href = "enroll.html";
+    return;
+  }
+  enrolledDescriptors = res.descriptors;
+
+  await tryGetGps();
+  await tryStartCamera();
+  updateButtonStates();
+}
+
+async function detectLoop() {
+  const descriptor = await detectFaceDescriptor(video);
+  if (descriptor) {
+    const { match } = isSameFaceMulti(descriptor, enrolledDescriptors);
+    currentDescriptor = descriptor;
+    faceMatched = match;
+    if (match) {
+      faceStatus.textContent = "चेहरा जुळला ✓ (नोंदवलेला कर्मचारीच)";
+      faceStatus.className = "face-status face-ok";
+    } else {
+      faceStatus.textContent = "चेहरा जुळत नाही — हा नोंदवलेला कर्मचारी दिसत नाही";
+      faceStatus.className = "face-status face-no";
+    }
+  } else {
+    faceMatched = false;
+    faceStatus.textContent = "चेहरा शोधत आहे...";
+    faceStatus.className = "face-status face-no";
+  }
+  updateButtonStates();
+  setTimeout(detectLoop, 600);
+}
+
+async function submit(session) {
+  if (!currentCoords) {
+    msgBox.innerHTML = '<div class="msg err">GPS उपलब्ध नाही</div>';
+    return;
+  }
+  morningBtn.disabled = true;
+  afternoonBtn.disabled = true;
+  msgBox.innerHTML = '<div class="msg ok">पाठवत आहे...</div>';
+
+  const photoBase64 = captureFrameAsBase64(video);
+  try {
+    const res = await Api.markAttendance({
+      mobileNumber: mobile,
+      lat: currentCoords.latitude,
+      lon: currentCoords.longitude,
+      photoBase64,
+      session,
+    });
+    msgBox.innerHTML = res.success
+      ? '<div class="msg ok">' + res.message + '</div>'
+      : '<div class="msg err">' + res.message + '</div>';
+    if (res.success) {
+      if (session === "morning") dayStatus.morningDone = true;
+      else dayStatus.afternoonDone = true;
+    }
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
+  }
+  updateButtonStates();
+}
+
+morningBtn.onclick = () => submit("morning");
+afternoonBtn.onclick = () => submit("afternoon");
+
+if (!mobile) window.location.href = "index.html";
+else init();
+</script>
+</body>
+</html>

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="mr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>स्पॉट असाइन</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  #mapBox { height: 260px; border-radius: 12px; overflow: hidden; margin-top: 12px; }
+  .mode-tabs { display: flex; gap: 8px; margin-top: 10px; }
+  .mode-tab {
+    flex: 1; padding: 10px; text-align: center; border-radius: 10px; border: 1.5px solid var(--green-deep);
+    color: var(--green-deep); font-size: 13px; font-weight: 600; cursor: pointer; background: transparent;
+  }
+  .mode-tab.active { background: var(--green-deep); color: var(--paper); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>नवीन कामाची जागा नोंदवा</h1>
+    <p data-app-name style="font-size:11px;opacity:.85;"></p>
+  </div>
+
+  <div class="mode-tabs">
+    <button class="mode-tab active" id="tabGps">📷 GPS + फोटो (प्रत्यक्ष जागेवर जाऊन)</button>
+    <button class="mode-tab" id="tabMap">🗺️ नकाशावरून निवडा</button>
+  </div>
+
+  <!-- ==== मोड १: GPS + फोटो ==== -->
+  <div class="card" id="gpsModeBox" style="margin-top:14px;">
+    <p style="font-size:12px;text-align:center;margin-top:0;">
+      प्रत्यक्ष कामाच्या जागेवर उभे राहून खालील फोटो घ्या — याच क्षणीचे GPS
+      या जागेचा <b>केंद्रबिंदू</b> म्हणून नोंदवले जाईल.
+    </p>
+
+    <div id="gpsBox" class="msg ok">GPS मिळवत आहे...</div>
+    <button class="outline" id="gpsRetryBtn" style="display:none;">📍 GPS पुन्हा मिळवा</button>
+
+    <div class="video-frame"><video id="video" autoplay muted playsinline></video></div>
+    <button class="outline" id="camRetryBtn" style="display:none;">📷 कॅमेरा पुन्हा सुरू करा</button>
+
+    <label>जागेचे नाव</label>
+    <input type="text" id="nameInput" placeholder="उदा. मीटर क्र. १२३ / बंधारा साईट">
+    <label>अनुज्ञेय त्रिज्या (मीटर)</label>
+    <input type="number" id="radiusInput" value="50" min="5">
+    <button class="primary" id="captureBtn" disabled>जागेचा फोटो घ्या व नोंदवा</button>
+  </div>
+
+  <!-- ==== मोड २: नकाशा ==== -->
+  <div class="card" id="mapModeBox" style="margin-top:14px; display:none;">
+    <p style="font-size:12px;text-align:center;margin-top:0;">
+      नकाशावर हवी ती जागा टॅप/क्लिक करून केंद्रबिंदू निवडा — प्रत्यक्ष जागेवर
+      जाण्याची गरज नाही. फोटो-पुरावा राहणार नाही.
+    </p>
+    <div id="mapBox"></div>
+    <p style="font-size:11px;text-align:center;color:#6b6a63;margin:6px 0 0;">
+      निवडलेले स्थान: <span id="mapCoordsLbl">— नकाशावर टॅप करा —</span>
+    </p>
+
+    <label>जागेचे नाव</label>
+    <input type="text" id="nameInput2" placeholder="उदा. मीटर क्र. १२३ / बंधारा साईट">
+    <label>अनुज्ञेय त्रिज्या (मीटर)</label>
+    <input type="number" id="radiusInput2" value="50" min="5">
+    <button class="primary" id="saveMapBtn" disabled>ही जागा नोंदवा</button>
+  </div>
+
+  <div id="msgBox"></div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3 style="font-size:14px;margin-top:0;">आधीच नोंदवलेल्या जागा</h3>
+    <div id="locList" style="font-size:12px;">लोड होत आहे...</div>
+  </div>
+
+  <div class="nav">
+    <a href="admin.html">← अॅडमिन पॅनलला परत जा</a>
+    <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
+  </div>
+</div>
+
+<script src="config.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: config.js लोड होऊ शकले नाही</div>')"></script>
+<script src="api.js" onerror="document.body.insertAdjacentHTML('afterbegin','<div style=&quot;background:#7A1F2B;color:#fff;padding:10px;text-align:center;font-size:12px;&quot;>चूक: api.js लोड होऊ शकले नाही</div>')"></script>
+<script src="auth-guard.js"></script>
+<script src="settings-sync.js"></script>
+<script src="face-utils.js"></script>
+<script src="geo.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+if (localStorage.getItem("role") !== "developer") {
+  alert("ही सुविधा फक्त Developer साठी आहे");
+  window.location.href = "admin.html";
+}
+
+const video = document.getElementById("video");
+const gpsBox = document.getElementById("gpsBox");
+const captureBtn = document.getElementById("captureBtn");
+const msgBox = document.getElementById("msgBox");
+let currentCoords = null;
+
+/* ---------- मोड टॅब बदल ---------- */
+document.getElementById("tabGps").onclick = () => {
+  document.getElementById("tabGps").classList.add("active");
+  document.getElementById("tabMap").classList.remove("active");
+  document.getElementById("gpsModeBox").style.display = "block";
+  document.getElementById("mapModeBox").style.display = "none";
+};
+document.getElementById("tabMap").onclick = () => {
+  document.getElementById("tabMap").classList.add("active");
+  document.getElementById("tabGps").classList.remove("active");
+  document.getElementById("mapModeBox").style.display = "block";
+  document.getElementById("gpsModeBox").style.display = "none";
+  setTimeout(() => { if (map) map.invalidateSize(); }, 100);
+};
+
+/* ---------- मोड १: GPS + फोटो ---------- */
+async function tryGetGps() {
+  gpsBox.className = "msg ok";
+  gpsBox.textContent = "GPS मिळवत आहे...";
+  document.getElementById("gpsRetryBtn").style.display = "none";
+  try {
+    currentCoords = await getCurrentPosition();
+    gpsBox.textContent = "GPS मिळाले ✓ (अचूकता: " + Math.round(currentCoords.accuracy) + " मी.)";
+    captureBtn.disabled = false;
+  } catch (e) {
+    gpsBox.className = "msg err";
+    gpsBox.textContent = e.message;
+    document.getElementById("gpsRetryBtn").style.display = "block";
+    captureBtn.disabled = true;
+  }
+}
+
+async function tryStartCamera() {
+  document.getElementById("camRetryBtn").style.display = "none";
+  try {
+    await startCamera(video, "environment");
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">' + e.message + '</div>';
+    document.getElementById("camRetryBtn").style.display = "block";
+  }
+}
+
+document.getElementById("gpsRetryBtn").onclick = tryGetGps;
+document.getElementById("camRetryBtn").onclick = tryStartCamera;
+
+function captureBase64() {
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+}
+
+captureBtn.onclick = async () => {
+  const name = document.getElementById("nameInput").value.trim();
+  const radius = document.getElementById("radiusInput").value.trim();
+  if (!name) { msgBox.innerHTML = '<div class="msg err">कृपया जागेचे नाव टाका</div>'; return; }
+  if (!currentCoords) { msgBox.innerHTML = '<div class="msg err">GPS उपलब्ध नाही</div>'; return; }
+
+  captureBtn.disabled = true;
+  msgBox.innerHTML = '<div class="msg ok">नोंदवत आहे...</div>';
+  try {
+    const res = await Api.addWorkLocation({
+      name, lat: currentCoords.latitude, lon: currentCoords.longitude,
+      radiusMeters: radius, photoBase64: captureBase64(),
+    });
+    msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+    if (res.success) { document.getElementById("nameInput").value = ""; loadLocations(); }
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
+  }
+  captureBtn.disabled = false;
+};
+
+/* ---------- मोड २: नकाशा (Leaflet + OpenStreetMap, विनामूल्य, API-key लागत नाही) ---------- */
+let map = null, marker = null, radiusCircle = null, chosenLatLng = null;
+
+function initMap() {
+  map = L.map("mapBox").setView([19.7515, 75.7139], 6); // महाराष्ट्र केंद्रबिंदू, डीफॉल्ट झूम
+
+  const streetLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap"
+  });
+  const satelliteLayer = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    { attribution: "Tiles © Esri" }
+  );
+
+  streetLayer.addTo(map); // डीफॉल्ट: रस्ता नकाशा
+  L.control.layers(
+    { "🗺️ रस्ता नकाशा": streetLayer, "🛰️ सॅटेलाइट": satelliteLayer },
+    null,
+    { position: "topright", collapsed: false }
+  ).addTo(map);
+
+  map.on("click", (e) => {
+    chosenLatLng = e.latlng;
+    document.getElementById("mapCoordsLbl").textContent =
+      chosenLatLng.lat.toFixed(6) + ", " + chosenLatLng.lng.toFixed(6);
+
+    if (marker) map.removeLayer(marker);
+    marker = L.marker(chosenLatLng).addTo(map);
+    updateRadiusCircle();
+    document.getElementById("saveMapBtn").disabled = false;
+  });
+
+  // सध्याचं GPS मिळालं तर तिथून नकाशा सुरू करा (सोयीसाठी)
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition((pos) => {
+      map.setView([pos.coords.latitude, pos.coords.longitude], 15);
+    }, () => {}, { timeout: 5000 });
+  }
+}
+
+function updateRadiusCircle() {
+  const radius = Number(document.getElementById("radiusInput2").value) || 50;
+  if (radiusCircle) map.removeLayer(radiusCircle);
+  if (chosenLatLng) {
+    radiusCircle = L.circle(chosenLatLng, { radius, color: "#d98e04" }).addTo(map);
+  }
+}
+document.getElementById("radiusInput2").addEventListener("input", updateRadiusCircle);
+
+document.getElementById("saveMapBtn").onclick = async () => {
+  const name = document.getElementById("nameInput2").value.trim();
+  const radius = document.getElementById("radiusInput2").value.trim();
+  if (!name) { msgBox.innerHTML = '<div class="msg err">कृपया जागेचे नाव टाका</div>'; return; }
+  if (!chosenLatLng) { msgBox.innerHTML = '<div class="msg err">कृपया नकाशावर जागा निवडा</div>'; return; }
+
+  const btn = document.getElementById("saveMapBtn");
+  btn.disabled = true;
+  msgBox.innerHTML = '<div class="msg ok">नोंदवत आहे...</div>';
+  try {
+    const res = await Api.addWorkLocation({
+      name, lat: chosenLatLng.lat, lon: chosenLatLng.lng, radiusMeters: radius, photoBase64: null,
+    });
+    msgBox.innerHTML = '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
+    if (res.success) { document.getElementById("nameInput2").value = ""; loadLocations(); }
+  } catch (e) {
+    msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
+  }
+  btn.disabled = false;
+};
+
+/* ---------- यादी ---------- */
+async function loadLocations() {
+  const listBox = document.getElementById("locList");
+  try {
+    const res = await Api.listLocations();
+    if (res.success && res.locations.length > 0) {
+      listBox.innerHTML = res.locations.map(l =>
+        '<div class="staff-row"><div><b>' + l.name + '</b><br><span style="color:#6b6a63;">त्रिज्या: ' +
+        l.radiusMeters + ' मी.</span></div></div>'
+      ).join("");
+    } else {
+      listBox.innerHTML = "अद्याप कोणतीही जागा नोंदवलेली नाही.";
+    }
+  } catch (e) {
+    listBox.innerHTML = "यादी आणता आली नाही.";
+  }
+}
+
+tryGetGps();
+tryStartCamera();
+initMap();
+loadLocations();
+</script>
+</body>
+</html>
