@@ -23,6 +23,10 @@
  * - दोन्ही फोटो काढले → "पूर्ण हजेरी"
  * - दोन्हीपैकी एकही नाही (व सुट्टी/रजा नसेल तर) → "गैरहजर"
  * - एकदा एखाद्या सत्राचा फोटो नोंदवला की तोच सत्र पुन्हा नोंदवता येत नाही.
+ * - **कामानिमित्त बाहेर (Outdoor Duty)**: कर्मचारी नेमून दिलेल्या ठिकाणाबाहेर
+ *   असल्यास "कामानिमित्त बाहेर आहे" पर्याय निवडून कारण+ठिकाण लिहून फोटो पाठवू
+ *   शकतो — अशा वेळी GPS जिओफेन्स तपासणी वगळली जाते, पण चेहरा-ओळख व फोटो अजूनही
+ *   आवश्यक असतातच. ही नोंद Attendance शीटमध्ये व PDF अहवालातही दिसते.
  *
  * सुट्ट्या: शनिवार-रविवार (किंवा Settings मधील WeeklyOffDays) आपोआप साप्ताहिक
  * सुट्टी धरली जाते. याशिवाय Developer "Holidays" शीटमध्ये सण/शासकीय सुट्या
@@ -40,13 +44,14 @@
  * WorkLocations:  LocationID | LocationName | Latitude | Longitude | RadiusMeters |
  *                 SpotPhotoURL | TaggedBy | TaggedOn
  * Attendance:     Date | MobileNumber | MorningTime | MorningPhotoURL | MorningGPS |
- *                 AfternoonTime | AfternoonPhotoURL | AfternoonGPS | Status
+ *                 AfternoonTime | AfternoonPhotoURL | AfternoonGPS | Status |
+ *                 MorningNote | AfternoonNote
  * Holidays:       Date | HolidayName | AddedBy | AddedOn
  * LeaveRequests:  MobileNumber | Name | FromDate | ToDate | ProofFileURL | AppliedOn |
  *                 Status | LastEditedBy | LastEditedOn
  * Settings:       Key | Value  (rows: AppName, AppLogo, OrgAddress, MorningStartTime,
  *                 MorningEndTime, AfternoonStartTime, AfternoonEndTime, WeeklyOffDays,
- *                 GramPanchayatOfficerName, SarpanchName)
+ *                 StandbyMinutes, GramPanchayatOfficerName, SarpanchName)
  * ============================================================
  */
 
@@ -95,9 +100,15 @@ function setupProjectSheets() {
     ['MobileNumber', 'Name', 'Role', 'AssignedLocationID', 'Status', 'FaceDescriptor', 'FaceEnrolled', 'RegisteredDeviceID']);
   getOrCreateSheet_('WorkLocations',
     ['LocationID', 'LocationName', 'Latitude', 'Longitude', 'RadiusMeters', 'SpotPhotoURL', 'TaggedBy', 'TaggedOn']);
-  getOrCreateSheet_('Attendance',
+  const attSheet = getOrCreateSheet_('Attendance',
     ['Date', 'MobileNumber', 'MorningTime', 'MorningPhotoURL', 'MorningGPS',
-     'AfternoonTime', 'AfternoonPhotoURL', 'AfternoonGPS', 'Status']);
+     'AfternoonTime', 'AfternoonPhotoURL', 'AfternoonGPS', 'Status', 'MorningNote', 'AfternoonNote']);
+  // मागच्या अपडेटमधील ९-कॉलम शीट असेल (Note कॉलम्सशिवाय) तर तेवढेच जोडा — जुना डेटा सुरक्षित राहतो
+  const attHeaderRow = attSheet.getRange(1, 1, 1, Math.max(attSheet.getLastColumn(), 9)).getValues()[0];
+  if (!attHeaderRow[9]) {
+    attSheet.getRange(1, 10, 1, 2).setValues([['MorningNote', 'AfternoonNote']]);
+    attSheet.getRange(1, 10, 1, 2).setFontWeight('bold').setBackground('#e3ede7');
+  }
   getOrCreateSheet_('Holidays', ['Date', 'HolidayName', 'AddedBy', 'AddedOn']);
   getOrCreateSheet_('LeaveRequests',
     ['MobileNumber', 'Name', 'FromDate', 'ToDate', 'ProofFileURL', 'AppliedOn', 'Status', 'LastEditedBy', 'LastEditedOn']);
@@ -113,6 +124,7 @@ function setupProjectSheets() {
     AfternoonStartTime: '15:30',
     AfternoonEndTime: '19:00',
     WeeklyOffDays: '0,6', // 0=रविवार, 6=शनिवार (JavaScript/Apps Script दिवस क्रमांक)
+    StandbyMinutes: '0', // 0 = बंद (auto-logout नाही); Developer इथून मिनिटे सेट करू शकतो
     GramPanchayatOfficerName: '',
     SarpanchName: '',
   };
@@ -156,7 +168,7 @@ function archiveOldAttendanceAndStartFresh() {
   }
   getOrCreateSheet_('Attendance',
     ['Date', 'MobileNumber', 'MorningTime', 'MorningPhotoURL', 'MorningGPS',
-     'AfternoonTime', 'AfternoonPhotoURL', 'AfternoonGPS', 'Status']);
+     'AfternoonTime', 'AfternoonPhotoURL', 'AfternoonGPS', 'Status', 'MorningNote', 'AfternoonNote']);
   ui.alert('✅ नवीन "Attendance" शीट तयार झाली — सकाळ/दुपार दोन सत्रांसह.');
 }
 
@@ -524,7 +536,7 @@ function getTodayStatus(mobileNumber) {
   const attData = SHEET_ATTENDANCE.getDataRange().getValues();
   let morningDone = false, afternoonDone = false;
   for (let i = 1; i < attData.length; i++) {
-    if (attData[i][0] === todayStr && String(attData[i][1]) === String(mobileNumber)) {
+    if (normalizeDateStr_(attData[i][0]) === todayStr && String(attData[i][1]) === String(mobileNumber)) {
       morningDone = !!attData[i][2];
       afternoonDone = !!attData[i][5];
       break;
@@ -564,6 +576,11 @@ function markAttendance(req) {
   }
 
   const session = req.session === 'afternoon' ? 'afternoon' : 'morning';
+  const isOutdoor = !!req.isOutdoor;
+  if (isOutdoor && !String(req.outdoorReason || '').trim()) {
+    return { success: false, message: 'कामानिमित्त बाहेर असल्यास कारण व सध्याचे ठिकाण लिहिणे आवश्यक आहे' };
+  }
+
   const winStart = getSetting_(session === 'morning' ? 'MorningStartTime' : 'AfternoonStartTime')
     || (session === 'morning' ? '09:00' : '15:30');
   const winEnd = getSetting_(session === 'morning' ? 'MorningEndTime' : 'AfternoonEndTime')
@@ -577,29 +594,37 @@ function markAttendance(req) {
     };
   }
 
-  // GPS जिओफेन्स
-  const locData = SHEET_LOCATIONS.getDataRange().getValues();
-  let centerLat, centerLon, radius;
-  for (let i = 1; i < locData.length; i++) {
-    if (String(locData[i][0]) === String(locationId)) {
-      centerLat = locData[i][2]; centerLon = locData[i][3]; radius = locData[i][4]; break;
+  // GPS जिओफेन्स — कर्मचारी कामानिमित्त बाहेर असल्याचं सांगितलं असेल तरच ही तपासणी वगळली जाते
+  if (!isOutdoor) {
+    const locData = SHEET_LOCATIONS.getDataRange().getValues();
+    let centerLat, centerLon, radius;
+    for (let i = 1; i < locData.length; i++) {
+      if (String(locData[i][0]) === String(locationId)) {
+        centerLat = locData[i][2]; centerLon = locData[i][3]; radius = locData[i][4]; break;
+      }
     }
-  }
-  if (centerLat === undefined) return { success: false, message: 'नेमून दिलेले ठिकाण सापडले नाही' };
-  const dist = distanceMeters_(req.lat, req.lon, centerLat, centerLon);
-  if (dist > radius) {
-    return { success: false, message: 'तुम्ही कामाच्या ठिकाणाच्या मर्यादेबाहेर आहात (अंतर: ' + Math.round(dist) + ' मी.)' };
+    if (centerLat === undefined) return { success: false, message: 'नेमून दिलेले ठिकाण सापडले नाही' };
+    const dist = distanceMeters_(req.lat, req.lon, centerLat, centerLon);
+    if (dist > radius) {
+      return {
+        success: false,
+        message: 'तुम्ही कामाच्या ठिकाणाच्या मर्यादेबाहेर आहात (अंतर: ' + Math.round(dist) + ' मी.) — ' +
+          'कामानिमित्त बाहेर असल्यास "कामानिमित्त बाहेर आहे" पर्याय निवडून कारण नोंदवा'
+      };
+    }
   }
 
   const attData = SHEET_ATTENDANCE.getDataRange().getValues();
   let rowIndex = -1;
   for (let i = 1; i < attData.length; i++) {
-    if (attData[i][0] === todayStr && String(attData[i][1]) === String(req.mobileNumber)) { rowIndex = i + 1; break; }
+    if (normalizeDateStr_(attData[i][0]) === todayStr && String(attData[i][1]) === String(req.mobileNumber)) { rowIndex = i + 1; break; }
   }
 
   const colTime = session === 'morning' ? 3 : 6;
   const colPhoto = session === 'morning' ? 4 : 7;
   const colGps = session === 'morning' ? 5 : 8;
+  const colNote = session === 'morning' ? 10 : 11;
+  const noteValue = isOutdoor ? ('कामानिमित्त बाहेर: ' + String(req.outdoorReason).trim()) : '';
 
   if (rowIndex > 0) {
     const existingVal = SHEET_ATTENDANCE.getRange(rowIndex, colTime).getValue();
@@ -619,18 +644,20 @@ function markAttendance(req) {
   const gpsStr = req.lat + ',' + req.lon;
 
   if (rowIndex < 0) {
-    const newRow = ['', '', '', '', '', '', '', '', ''];
+    const newRow = ['', '', '', '', '', '', '', '', '', '', ''];
     newRow[0] = todayStr;
     newRow[1] = req.mobileNumber;
     newRow[colTime - 1] = timeStr;
     newRow[colPhoto - 1] = photoUrl;
     newRow[colGps - 1] = gpsStr;
+    newRow[colNote - 1] = noteValue;
     SHEET_ATTENDANCE.appendRow(newRow);
     rowIndex = SHEET_ATTENDANCE.getLastRow();
   } else {
     SHEET_ATTENDANCE.getRange(rowIndex, colTime).setValue(timeStr);
     SHEET_ATTENDANCE.getRange(rowIndex, colPhoto).setValue(photoUrl);
     SHEET_ATTENDANCE.getRange(rowIndex, colGps).setValue(gpsStr);
+    SHEET_ATTENDANCE.getRange(rowIndex, colNote).setValue(noteValue);
   }
 
   const updatedRow = SHEET_ATTENDANCE.getRange(rowIndex, 1, 1, 9).getValues()[0];
@@ -643,7 +670,8 @@ function markAttendance(req) {
 
   return {
     success: true,
-    message: (session === 'morning' ? 'सकाळची' : 'दुपारची') + ' हजेरी यशस्वी ✓ (सध्याची स्थिती: ' + finalStatus + ')',
+    message: (session === 'morning' ? 'सकाळची' : 'दुपारची') + ' हजेरी यशस्वी ✓ (सध्याची स्थिती: ' + finalStatus + ')' +
+      (isOutdoor ? ' — कामानिमित्त बाह्य नोंद जतन झाली' : ''),
     status: finalStatus
   };
 }
@@ -887,7 +915,7 @@ function buildEmployeeReportHtml_(user, attData, fromDate, toDate, appName, orgA
 
     let attRow = null;
     for (let i = 1; i < attData.length; i++) {
-      if (attData[i][0] === dStr && String(attData[i][1]) === String(user.mobile)) { attRow = attData[i]; break; }
+      if (normalizeDateStr_(attData[i][0]) === dStr && String(attData[i][1]) === String(user.mobile)) { attRow = attData[i]; break; }
     }
 
     const resolved = resolveDayStatus_(dCopy, dStr, user.mobile, attRow);
@@ -895,7 +923,9 @@ function buildEmployeeReportHtml_(user, attData, fromDate, toDate, appName, orgA
 
     let timeInfo = '-';
     if (attRow && (attRow[2] || attRow[5])) {
-      timeInfo = 'सकाळ: ' + (attRow[2] || '-') + '  दुपार: ' + (attRow[5] || '-');
+      const mNote = attRow[9] ? ' (' + attRow[9] + ')' : '';
+      const aNote = attRow[10] ? ' (' + attRow[10] + ')' : '';
+      timeInfo = 'सकाळ: ' + (attRow[2] || '-') + mNote + '  |  दुपार: ' + (attRow[5] || '-') + aNote;
     }
 
     if (resolved.category === 'present') presentDays += 1;

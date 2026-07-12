@@ -43,3 +43,41 @@ function doExit() {
   window.location.replace("index.html");
   setTimeout(() => { window.close(); }, 300);
 }
+
+/** ============================================================
+ *  Standby (निष्क्रियता) टायमर — Developer ने Admin पॅनलमधून ठरवलेल्या
+ *  मिनिटांपर्यंत काहीच स्पर्श/क्लिक/स्क्रोल न झाल्यास सुरक्षिततेसाठी
+ *  आपोआप लॉगआउट करते (शेअर्ड/सार्वजनिक डिव्हाइसवर लॉगिन तसाच राहू नये
+ *  म्हणून). Settings मध्ये StandbyMinutes = 0 असेल तर ही सुविधा बंद असते.
+ * ============================================================ */
+(function setupStandbyTimer_() {
+  let idleTimer = null;
+  let standbyMs = 0;
+
+  function resetIdleTimer_() {
+    if (!standbyMs) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      alert("बऱ्याच वेळ काहीच हालचाल न झाल्याने सुरक्षिततेसाठी आपोआप लॉगआउट करत आहोत.");
+      doLogout();
+    }, standbyMs);
+  }
+
+  async function initStandby_() {
+    try {
+      if (typeof Api === "undefined" || !localStorage.getItem("mobileNumber")) return;
+      const res = await Api.getSettings();
+      const minutes = Number(res.settings && res.settings.StandbyMinutes) || 0;
+      if (!minutes) return; // 0 = बंद
+      standbyMs = minutes * 60 * 1000;
+      ["click", "touchstart", "keydown", "mousemove", "scroll"].forEach(evt =>
+        document.addEventListener(evt, resetIdleTimer_, { passive: true })
+      );
+      resetIdleTimer_();
+    } catch (e) {
+      // सेटिंग्ज न मिळाल्यास standby बंदच राहील — अॅप वापरण्यास अडथळा येत नाही
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", initStandby_);
+})();

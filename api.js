@@ -50,8 +50,8 @@ const Api = {
   uploadLogo: (photoBase64) =>
     callBackend({ action: "uploadLogo", photoBase64, actorMobile: currentActorMobile() }),
 
-  markAttendance: ({ mobileNumber, lat, lon, photoBase64, session }) =>
-    callBackend({ action: "markAttendance", mobileNumber, lat, lon, photoBase64, session }),
+  markAttendance: ({ mobileNumber, lat, lon, photoBase64, session, isOutdoor, outdoorReason }) =>
+    callBackend({ action: "markAttendance", mobileNumber, lat, lon, photoBase64, session, isOutdoor, outdoorReason }),
 
   getTodayStatus: (mobileNumber) => callBackend({ action: "getTodayStatus", mobileNumber }),
 

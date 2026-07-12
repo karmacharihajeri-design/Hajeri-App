@@ -14,6 +14,12 @@
     color: var(--green-deep); font-size: 13px; font-weight: 600; cursor: pointer; background: transparent;
   }
   .mode-tab.active { background: var(--green-deep); color: var(--paper); }
+  .layer-toggle-row { display: flex; gap: 8px; margin-top: 8px; }
+  .layer-toggle-btn {
+    flex: 1; padding: 7px; text-align: center; border-radius: 8px; border: 1.5px solid var(--saffron);
+    color: #7a5300; background: var(--saffron-pale); font-size: 11.5px; font-weight: 700; cursor: pointer;
+  }
+  .layer-toggle-btn.active { background: var(--saffron); color: #3a2400; }
 </style>
 </head>
 <body>
@@ -55,6 +61,10 @@
       जाण्याची गरज नाही. फोटो-पुरावा राहणार नाही.
     </p>
     <div id="mapBox"></div>
+    <div class="layer-toggle-row">
+      <button type="button" class="layer-toggle-btn active" id="streetLayerBtn">🗺️ रस्ता नकाशा</button>
+      <button type="button" class="layer-toggle-btn" id="satelliteLayerBtn">🛰️ सॅटेलाइट</button>
+    </div>
     <p style="font-size:11px;text-align:center;color:#6b6a63;margin:6px 0 0;">
       निवडलेले स्थान: <span id="mapCoordsLbl">— नकाशावर टॅप करा —</span>
     </p>
@@ -187,11 +197,20 @@ function initMap() {
   );
 
   streetLayer.addTo(map); // डीफॉल्ट: रस्ता नकाशा
-  L.control.layers(
-    { "🗺️ रस्ता नकाशा": streetLayer, "🛰️ सॅटेलाइट": satelliteLayer },
-    null,
-    { position: "topright", collapsed: false }
-  ).addTo(map);
+
+  // मोबाईलवर नकाशा झाकून न टाकणारी, छोटी, रंगीत टॉगल बटणे (नकाशाच्या तळाला)
+  document.getElementById("streetLayerBtn").onclick = () => {
+    map.removeLayer(satelliteLayer);
+    streetLayer.addTo(map);
+    document.getElementById("streetLayerBtn").classList.add("active");
+    document.getElementById("satelliteLayerBtn").classList.remove("active");
+  };
+  document.getElementById("satelliteLayerBtn").onclick = () => {
+    map.removeLayer(streetLayer);
+    satelliteLayer.addTo(map);
+    document.getElementById("satelliteLayerBtn").classList.add("active");
+    document.getElementById("streetLayerBtn").classList.remove("active");
+  };
 
   map.on("click", (e) => {
     chosenLatLng = e.latlng;
@@ -204,11 +223,12 @@ function initMap() {
     document.getElementById("saveMapBtn").disabled = false;
   });
 
-  // सध्याचं GPS मिळालं तर तिथून नकाशा सुरू करा (सोयीसाठी)
+  // सध्याचं GPS मिळालं तर तिथून नकाशा सुरू करा (सोयीसाठी) — जास्त वेळ व अचूकता देऊन
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition((pos) => {
-      map.setView([pos.coords.latitude, pos.coords.longitude], 15);
-    }, () => {}, { timeout: 5000 });
+      map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+    }, () => { /* GPS न मिळाल्यास डीफॉल्ट महाराष्ट्र-केंद्रित दृश्य तसंच राहील */ },
+    { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
   }
 }
 

@@ -13,7 +13,12 @@
     <p data-app-name style="font-size:11px;opacity:.85;"></p>
   </div>
 
-  <div class="card">
+  <button class="primary" id="reportTopBtn" onclick="window.location.href='report.html'"
+    style="font-size:17px;padding:18px;border:3px solid var(--maroon);text-align:center;letter-spacing:.3px;">
+    📄 हजेरी पत्रक तयार करा
+  </button>
+
+  <div class="card" style="margin-top:20px;">
     <h3 style="font-size:14px;margin-top:0;">नवीन स्टाफ जोडा</h3>
     <label>नाव</label>
     <input type="text" id="nameInput">
@@ -44,7 +49,6 @@
   </div>
 
   <div class="nav" style="margin-top:20px;">
-    <a href="report.html">📄 हजेरी पत्रक तयार करा</a>
     <a href="spot-assign.html" id="spotAssignLink" style="display:none;">📍 नवीन जागा असाइन करा</a>
   </div>
 
@@ -88,6 +92,8 @@
     <input type="time" id="afternoonStartInput" value="15:30">
     <label>दुपारच्या हजेरीची वेळ (To)</label>
     <input type="time" id="afternoonEndInput" value="19:00">
+    <label>अॅपचा Standby वेळ (मिनिटे) — इतका वेळ काहीच हालचाल नसेल तर आपोआप लॉगआउट होईल (0 = बंद)</label>
+    <input type="number" id="standbyInput" min="0" value="0">
     <button class="outline" id="saveSettingsBtn">सेटिंग्ज सेव्ह करा</button>
 
     <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px;">
@@ -109,7 +115,14 @@
     <label>सुट्टीचे नाव</label>
     <input type="text" id="holidayNameInput" placeholder="उदा. दिवाळी, स्वातंत्र्य दिन">
     <button class="outline" id="addHolidayBtn">सुट्टी जोडा</button>
-    <div id="holidayList" style="font-size:12px;margin-top:14px;">लोड होत आहे...</div>
+
+    <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px;">
+      <label>सुट्टी शोधा (काढण्यासाठी)</label>
+      <input type="text" id="holidaySearchInput" list="holidayDatalist" placeholder="तारीख किंवा नाव टाइप करा...">
+      <datalist id="holidayDatalist"></datalist>
+      <button class="danger" id="removeSelectedHolidayBtn" style="margin-top:8px;">निवडलेली सुट्टी काढा</button>
+      <div id="holidayCount" style="font-size:11px;color:#6b6a63;margin-top:8px;">लोड होत आहे...</div>
+    </div>
   </div>
 
   <div class="card" style="margin-top:20px;">
@@ -173,6 +186,7 @@ setTimeout(() => {
     if (s.MorningEndTime) document.getElementById("morningEndInput").value = s.MorningEndTime;
     if (s.AfternoonStartTime) document.getElementById("afternoonStartInput").value = s.AfternoonStartTime;
     if (s.AfternoonEndTime) document.getElementById("afternoonEndInput").value = s.AfternoonEndTime;
+    if (s.StandbyMinutes !== undefined && s.StandbyMinutes !== "") document.getElementById("standbyInput").value = s.StandbyMinutes;
   }
 }, 800);
 
@@ -234,26 +248,28 @@ document.getElementById("saveSettingsBtn").onclick = async () => {
     MorningEndTime: document.getElementById("morningEndInput").value,
     AfternoonStartTime: document.getElementById("afternoonStartInput").value,
     AfternoonEndTime: document.getElementById("afternoonEndInput").value,
+    StandbyMinutes: document.getElementById("standbyInput").value,
   });
   document.getElementById("msgBox").innerHTML =
     '<div class="msg ' + (res.success ? "ok" : "err") + '">' + res.message + '</div>';
 };
 
-/* ---------- सुट्ट्यांची यादी (फक्त Developer) ---------- */
+/* ---------- सुट्ट्यांची यादी (फक्त Developer) — शोधण्यायोग्य dropdown ---------- */
+let holidaysCache = [];
 async function loadHolidays() {
-  const box = document.getElementById("holidayList");
+  const countBox = document.getElementById("holidayCount");
   try {
     const res = await Api.listHolidays();
-    if (res.success && res.holidays.length > 0) {
-      box.innerHTML = res.holidays.map(h =>
-        '<div class="staff-row"><div><b>' + h.date + '</b> — ' + h.name + '</div>' +
-        '<button class="danger" style="width:auto;padding:4px 10px;margin:0;" onclick="removeHoliday(' + h.rowIndex + ')">काढा</button></div>'
-      ).join("");
-    } else {
-      box.innerHTML = "अद्याप कोणतीही सुट्टी जोडलेली नाही.";
-    }
+    holidaysCache = res.success ? res.holidays : [];
+    const datalist = document.getElementById("holidayDatalist");
+    datalist.innerHTML = holidaysCache.map(h =>
+      '<option value="' + h.date + ' — ' + h.name + '"></option>'
+    ).join("");
+    countBox.textContent = holidaysCache.length > 0
+      ? holidaysCache.length + " सुट्ट्या नोंदवलेल्या आहेत — वरच्या बॉक्समध्ये टाइप करून शोधा"
+      : "अद्याप कोणतीही सुट्टी जोडलेली नाही.";
   } catch (e) {
-    box.innerHTML = "यादी आणता आली नाही.";
+    countBox.textContent = "यादी आणता आली नाही.";
   }
 }
 
@@ -271,11 +287,18 @@ document.getElementById("addHolidayBtn").onclick = async () => {
   }
 };
 
-async function removeHoliday(rowIndex) {
-  if (!confirm("ही सुट्टी काढायची आहे का?")) return;
-  const res = await Api.deleteHoliday(rowIndex);
-  if (res.success) loadHolidays(); else alert(res.message);
-}
+document.getElementById("removeSelectedHolidayBtn").onclick = async () => {
+  const val = document.getElementById("holidaySearchInput").value.trim();
+  const match = holidaysCache.find(h => (h.date + " — " + h.name) === val);
+  if (!match) { alert("कृपया शोध-यादीतून बरोबर सुट्टी निवडा (टाइप केल्यावर सुचवलेल्या यादीतून एक निवडा)"); return; }
+  if (!confirm("ही सुट्टी काढायची आहे का? (" + match.date + " — " + match.name + ")")) return;
+  const res = await Api.deleteHoliday(match.rowIndex);
+  alert(res.message);
+  if (res.success) {
+    document.getElementById("holidaySearchInput").value = "";
+    loadHolidays();
+  }
+};
 
 /* ---------- रजा अर्ज (Admin + Developer दोघेही पाहू/बदलू शकतात) ---------- */
 async function loadLeaves() {

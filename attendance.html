@@ -31,6 +31,19 @@
 
     <button class="primary" id="afternoonBtn" disabled style="margin-top:16px;">🌇 दुपारची हजेरी</button>
     <div id="afternoonWindowLbl" style="font-size:11px;text-align:center;color:#6b6a63;margin:4px 0 0;"></div>
+
+    <div class="card" id="outdoorCard" style="margin-top:16px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:0;">
+        <input type="checkbox" id="outdoorCheck" style="width:auto;"> 📍 आज कामानिमित्त नेमून दिलेल्या ठिकाणाबाहेर आहे
+      </label>
+      <div id="outdoorReasonWrap" style="display:none;margin-top:10px;">
+        <label>कारण व सध्याचे ठिकाण लिहा</label>
+        <input type="text" id="outdoorReasonInput" placeholder="उदा. तालुका कार्यालयात मीटिंगसाठी">
+        <p style="font-size:11px;color:#6b6a63;margin:8px 0 0;">
+          हे निवडल्यास कामाच्या ठिकाणाच्या GPS-मर्यादेची अट वगळली जाईल, पण चेहरा-ओळख व फोटो अजूनही आवश्यक असेल — सध्या तुम्ही जिथे आहात तिथला फोटो व GPS नोंदवला जाईल.
+        </p>
+      </div>
+    </div>
   </div>
 
   <div class="nav">
@@ -39,7 +52,7 @@
   </div>
   <div class="nav" style="margin-top:8px;">
     <a href="leave.html">🗓️ रजेसाठी अर्ज</a>
-    <a href="admin.html">Admin →</a>
+    <a href="admin.html" id="adminNavLink">Admin →</a>
   </div>
 </div>
 
@@ -78,6 +91,11 @@ if (isAssisted) {
   document.querySelector(".topbar").style.background = "var(--saffron)";
 } else {
   document.getElementById("userNameLbl").textContent = localStorage.getItem("name") || "";
+}
+
+// साध्या "user" (कामगार) रोलला Admin लिंक दिसू नये
+if (loggedInRole !== "admin" && loggedInRole !== "developer") {
+  document.getElementById("adminNavLink").style.display = "none";
 }
 
 /** आजचा दिवस सुट्टी/रजा/नेहमीचा कामाचा दिवस आहे का हे तपासते.
@@ -173,6 +191,10 @@ async function tryStartCamera() {
 document.getElementById("gpsRetryBtn").onclick = tryGetGps;
 document.getElementById("camRetryBtn").onclick = tryStartCamera;
 
+document.getElementById("outdoorCheck").onchange = (e) => {
+  document.getElementById("outdoorReasonWrap").style.display = e.target.checked ? "block" : "none";
+};
+
 async function init() {
   const workingDay = await loadDayStatus();
   if (!workingDay) return; // सुट्टी/रजा — पुढे कॅमेरा/GPS सुरू करायची गरज नाही
@@ -216,6 +238,13 @@ async function submit(session) {
     msgBox.innerHTML = '<div class="msg err">GPS उपलब्ध नाही</div>';
     return;
   }
+  const isOutdoor = document.getElementById("outdoorCheck").checked;
+  const outdoorReason = document.getElementById("outdoorReasonInput").value.trim();
+  if (isOutdoor && !outdoorReason) {
+    msgBox.innerHTML = '<div class="msg err">कृपया कारण व सध्याचे ठिकाण लिहा</div>';
+    return;
+  }
+
   morningBtn.disabled = true;
   afternoonBtn.disabled = true;
   msgBox.innerHTML = '<div class="msg ok">पाठवत आहे...</div>';
@@ -228,6 +257,8 @@ async function submit(session) {
       lon: currentCoords.longitude,
       photoBase64,
       session,
+      isOutdoor,
+      outdoorReason,
     });
     msgBox.innerHTML = res.success
       ? '<div class="msg ok">' + res.message + '</div>'
@@ -235,6 +266,9 @@ async function submit(session) {
     if (res.success) {
       if (session === "morning") dayStatus.morningDone = true;
       else dayStatus.afternoonDone = true;
+      document.getElementById("outdoorCheck").checked = false;
+      document.getElementById("outdoorReasonWrap").style.display = "none";
+      document.getElementById("outdoorReasonInput").value = "";
     }
   } catch (e) {
     msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';

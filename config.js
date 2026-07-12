@@ -3,7 +3,7 @@
 // ==========================================================
 
 // तुमच्या Google Apps Script Web App ची URL (Deploy > Web app केल्यावर मिळते)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyAKzbnp2y_meViMr51s09hMdCxsCZqBr4FPZoXhEfWIZwzJ2Cmfq5W7w-P3-Ty3OWkOw/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxQJyBdUFj2psCl8abvJNrhdDdWsoEVcchkrPbveaDPzlW6F4vWf5dgdC5t0lST1CSEkg/exec";
 
 // face-api.js साठी मॉडेल फाईल्सचा पत्ता.
 // पर्याय १ (सोपे): खालील सार्वजनिक CDN वापरा (इंटरनेट कनेक्शन लागेल)
