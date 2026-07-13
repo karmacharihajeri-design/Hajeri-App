@@ -75,7 +75,30 @@ function onOpen() {
     .addItem('नमुना डेटा भरा (टेस्टिंगसाठी)', 'insertSampleData')
     .addSeparator()
     .addItem('जुनी हजेरी शीट आर्काइव्ह करून नवीन (सकाळ/दुपार) सुरू करा', 'archiveOldAttendanceAndStartFresh')
+    .addSeparator()
+    .addItem('⏰ सकाळ/दुपार वेळ-सेटिंग्ज दुरुस्त करा (बटणे कायम बंद दिसत असल्यास हे एकदा चालवा)', 'repairTimeSettings')
     .addToUi();
+}
+
+/** Settings शीटमधील MorningStartTime/MorningEndTime/AfternoonStartTime/
+ *  AfternoonEndTime हे सेल्स Google Sheets कडून आपोआप Date/Time मूल्यात
+ *  रूपांतरित झाले असतील (जुनी बग — त्यामुळे हजेरीची दोन्ही बटणे कायम बंद
+ *  दिसत होती व वेळ चुकीची दाखवत होती) — हे फंक्शन ते सेल्स Plain-text
+ *  फॉरमॅटमध्ये बदलून योग्य "HH:mm" स्ट्रिंगने पुन्हा भरते. एकदाच चालवा
+ *  (मेनूतून: हजेरी अॅप सेटअप > वेळ-सेटिंग्ज दुरुस्त करा). */
+function repairTimeSettings() {
+  const data = SHEET_SETTINGS.getDataRange().getValues();
+  let fixedCount = 0;
+  for (let i = 1; i < data.length; i++) {
+    const key = data[i][0];
+    if (TIME_SETTING_KEYS_.indexOf(key) === -1) continue;
+    const normalized = normalizeSettingValue_(data[i][1]) || (key.indexOf('Morning') === 0
+      ? (key.indexOf('End') !== -1 ? '11:00' : '09:00')
+      : (key.indexOf('End') !== -1 ? '19:00' : '15:30'));
+    SHEET_SETTINGS.getRange(i + 1, 2).setNumberFormat('@').setValue(normalized);
+    fixedCount++;
+  }
+  SpreadsheetApp.getUi().alert('✅ ' + fixedCount + ' वेळ-सेटिंग्ज दुरुस्त झाल्या. आता हजेरी बटणे व्यवस्थित काम करतील.');
 }
 
 function getOrCreateSheet_(name, headers) {
@@ -434,7 +457,7 @@ function uploadLogo(req) {
 function getAllSettings() {
   const data = SHEET_SETTINGS.getDataRange().getValues();
   const settings = {};
-  for (let i = 1; i < data.length; i++) settings[data[i][0]] = data[i][1];
+  for (let i = 1; i < data.length; i++) settings[data[i][0]] = normalizeSettingValue_(data[i][1]);
   return { success: true, settings: settings };
 }
 
@@ -508,9 +531,20 @@ function isWithinWindow_(dateObj, startStr, endStr) {
   return nowMin >= toMinutes(startStr) && nowMin <= toMinutes(endStr);
 }
 
+/** Google Sheets मध्ये "09:00" सारखी वेळ टाईप केली/लिहिली की Sheets ती
+ *  आपोआप Date/Time मूल्यात रूपांतरित करते (साधा मजकूर राहत नाही) — त्यामुळे
+ *  getValue() ने ती वाचल्यास खरा "HH:mm" स्ट्रिंग न मिळता एक Date ऑब्जेक्ट
+ *  मिळतो, जो JSON मध्ये विचित्र स्वरूपात जातो व फ्रंटएंडवरील वेळ-तुलना
+ *  (सकाळ/दुपार सत्र सक्रिय आहे का) पूर्णपणे चुकते (कायम "वेळ नाही" दाखवते).
+ *  हे फंक्शन असा Date आढळल्यास त्याला परत योग्य "HH:mm" स्ट्रिंगमध्ये बदलते. */
+function normalizeSettingValue_(val) {
+  if (val instanceof Date) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'HH:mm');
+  return val;
+}
+
 function getSetting_(key) {
   const data = SHEET_SETTINGS.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) if (data[i][0] === key) return data[i][1];
+  for (let i = 1; i < data.length; i++) if (data[i][0] === key) return normalizeSettingValue_(data[i][1]);
   return '';
 }
 
@@ -855,17 +889,35 @@ function removeStaff(req) {
 /* ---------------------------------------------------------
  * Developer सेटिंग्ज — फक्त Developer बदलू शकतो
  * --------------------------------------------------------- */
+// या key च्या value "HH:mm" वेळेच्या स्वरूपात असतात — Google Sheets ला ही
+// किंमत सेल मध्ये लिहिताना आपोआप Date/Time मध्ये रूपांतरित होऊ नये (जुनी
+// समस्या — बटणे कायम निष्क्रिय/चुकीची वेळ दाखवत होती) म्हणून त्या सेलला
+// आधी "Plain text" फॉरमॅट लावूनच किंमत लिहितो.
+const TIME_SETTING_KEYS_ = ['MorningStartTime', 'MorningEndTime', 'AfternoonStartTime', 'AfternoonEndTime'];
+
 function updateSettings(req) {
   const auth = requireRole_(req.actorMobile, ['developer']);
   if (!auth.ok) return { success: false, message: auth.message };
 
   const data = SHEET_SETTINGS.getDataRange().getValues();
   for (let key in req.settings) {
+    const value = req.settings[key];
     let found = false;
     for (let i = 1; i < data.length; i++) {
-      if (data[i][0] === key) { SHEET_SETTINGS.getRange(i + 1, 2).setValue(req.settings[key]); found = true; break; }
+      if (data[i][0] === key) {
+        const cell = SHEET_SETTINGS.getRange(i + 1, 2);
+        if (TIME_SETTING_KEYS_.indexOf(key) !== -1) cell.setNumberFormat('@'); // Plain text — वेळ Date मध्ये बदलू नये
+        cell.setValue(value);
+        found = true;
+        break;
+      }
     }
-    if (!found) SHEET_SETTINGS.appendRow([key, req.settings[key]]);
+    if (!found) {
+      SHEET_SETTINGS.appendRow([key, value]);
+      if (TIME_SETTING_KEYS_.indexOf(key) !== -1) {
+        SHEET_SETTINGS.getRange(SHEET_SETTINGS.getLastRow(), 2).setNumberFormat('@').setValue(value);
+      }
+    }
   }
   return { success: true, message: 'सेटिंग्स अपडेट झाल्या' };
 }

@@ -267,9 +267,21 @@ async function detectLoop() {
     faceMatched = match;
     if (match) {
       hitCount = Math.min(STABLE_HITS_NEEDED, hitCount + 1);
-      faceStatus.textContent = hitCount >= STABLE_HITS_NEEDED
-        ? "चेहरा जुळला ✓ — हजेरी नोंदवत आहे..."
-        : "चेहरा जुळला ✓ — स्थिर रहा...";
+      if (hitCount >= STABLE_HITS_NEEDED) {
+        // चेहरा पुरेसा स्थिर जुळला — पण खरोखर नोंदवलं जाणार आहे का, ते
+        // सध्याच्या सत्र-वेळेवर अवलंबून आहे. उगाच "नोंदवत आहे..." दाखवून
+        // कर्मचाऱ्याला विनाकारण थांबवून ठेवू नये — नेमकं कारण सांगावं.
+        const availableSession = getAvailableSession_();
+        if (availableSession) {
+          faceStatus.textContent = "चेहरा जुळला ✓ — हजेरी नोंदवत आहे...";
+        } else if (dayStatus && dayStatus.morningDone && dayStatus.afternoonDone) {
+          faceStatus.textContent = "चेहरा जुळला ✓ — आजची दोन्ही सत्रांची हजेरी आधीच झाली आहे";
+        } else {
+          faceStatus.textContent = "चेहरा जुळला ✓ — पण सध्या कोणत्याही सत्राची हजेरीची वेळ नाही";
+        }
+      } else {
+        faceStatus.textContent = "चेहरा जुळला ✓ — स्थिर रहा...";
+      }
       faceStatus.className = "face-status face-ok";
     } else {
       hitCount = Math.max(0, hitCount - 1); // एखादी फ्रेम चुकली तरी पूर्ण प्रगती वाया जाऊ नये
@@ -287,20 +299,28 @@ async function detectLoop() {
   setTimeout(detectLoop, 300);
 }
 
+/** सध्याच्या क्षणी कोणत्या सत्राची हजेरी शक्य आहे — कोणतंही नसेल तर null.
+ *  detectLoop (स्टेटस मजकूरासाठी) व maybeAutoSubmit दोन्हीकडून वापरलं जातं,
+ *  जेणेकरून दोन्ही ठिकाणी एकच लॉजिक राहील. */
+function getAvailableSession_() {
+  if (!dayStatus || dayStatus.dayType !== "working") return null;
+  if (!dayStatus.morningDone && withinWindowNow_(dayStatus.morningWindow)) return "morning";
+  if (!dayStatus.afternoonDone && withinWindowNow_(dayStatus.afternoonWindow)) return "afternoon";
+  return null;
+}
+
 /** चेहरा स्थिर जुळला, वेळ योग्य आहे, GPS मिळालाय — तर बटण न दाबताच आपोआप
  *  त्या सत्राची हजेरी नोंदवते. (Outdoor Duty निवडलेलं असल्यास आधी कारण
  *  लिहिणं आवश्यक — रिकामं असेपर्यंत आपोआप पाठवलं जात नाही.) */
 function maybeAutoSubmit() {
-  if (autoSubmitting || !dayStatus || dayStatus.dayType !== "working" || !currentCoords) return;
+  if (autoSubmitting || !currentCoords) return;
   if (hitCount < STABLE_HITS_NEEDED) return;
 
   const isOutdoor = document.getElementById("outdoorCheck").checked;
   const outdoorReason = document.getElementById("outdoorReasonInput").value.trim();
   if (isOutdoor && !outdoorReason) return;
 
-  let sessionToTry = null;
-  if (!dayStatus.morningDone && withinWindowNow_(dayStatus.morningWindow)) sessionToTry = "morning";
-  else if (!dayStatus.afternoonDone && withinWindowNow_(dayStatus.afternoonWindow)) sessionToTry = "afternoon";
+  const sessionToTry = getAvailableSession_();
   if (!sessionToTry) return;
 
   hitCount = 0;
