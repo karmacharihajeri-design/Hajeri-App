@@ -170,7 +170,12 @@ function updateButtonStates() {
 }
 setInterval(updateButtonStates, 15000); // वेळेची कक्षा ओलांडली/सुरू झाली की बटण आपोआप अपडेट व्हावे
 
-/** कर्मचारी नेमून दिलेल्या ठिकाणापासून किती लांब आहे हे स्क्रीनवर लाईव्ह दाखवते */
+let wasWithinGeofence = null; // null = अजून माहीत नाही (आत/बाहेर बदलल्यावरच toast दाखवायचा, पहिल्याच वाचनावर नाही)
+
+/** कर्मचारी नेमून दिलेल्या ठिकाणापासून किती लांब आहे हे स्क्रीनवर लाईव्ह
+ *  (सतत अपडेट होत) व तंतोतंत (मीटरपर्यंत अचूक + GPS ची स्वतःची अचूकताही
+ *  दाखवून) दाखवते. तसेच कर्मचारी चुकीच्या ठिकाणाहून बरोबर ठिकाणी आला/गेला
+ *  (सीमारेषा ओलांडली) की त्याक्षणी वेगळी सूचना (toast) दाखवते. */
 function updateDistanceBox() {
   const box = document.getElementById("distanceBox");
   if (!assignedLocation || !currentCoords) { box.style.display = "none"; return; }
@@ -182,36 +187,61 @@ function updateDistanceBox() {
     box.style.background = "var(--saffron-pale)";
     box.style.color = "#7a5300";
     box.textContent = "📍 कामानिमित्त बाहेर मोड सुरू — अंतराची अट तपासली जाणार नाही";
+    wasWithinGeofence = null; // outdoor मोड बंद केल्यावर परत ताजी सुरुवात व्हावी
     return;
   }
 
   const dist = distanceMeters(currentCoords.latitude, currentCoords.longitude, assignedLocation.lat, assignedLocation.lon);
-  if (dist <= assignedLocation.radiusMeters) {
+  const accuracyTxt = currentCoords.accuracy ? " (GPS अचूकता ±" + Math.round(currentCoords.accuracy) + " मी.)" : "";
+  const isWithin = dist <= assignedLocation.radiusMeters;
+
+  if (isWithin) {
     box.style.background = "var(--green-pale)";
     box.style.color = "var(--green-deep)";
-    box.textContent = "✅ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणी आहात";
+    box.textContent = "✅ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणी आहात — अंतर: " + Math.round(dist) + " मी." + accuracyTxt;
   } else {
     box.style.background = "var(--maroon-pale)";
     box.style.color = "var(--maroon)";
-    box.textContent = "⚠️ तुम्ही \"" + assignedLocation.name + "\" पासून " + Math.round(dist) + " मी. लांब आहात — कृपया जवळ जा";
+    box.textContent = "⚠️ तुम्ही \"" + assignedLocation.name + "\" पासून " + Math.round(dist) + " मी. लांब आहात — कृपया जवळ जा" + accuracyTxt;
   }
+
+  // सीमारेषा ओलांडली (आत↔बाहेर बदल) की तात्काळ वेगळी सूचना — पहिल्याच
+  // GPS वाचनावर toast दाखवत नाही (त्या क्षणी already-known स्थितीच असते)
+  if (wasWithinGeofence !== null && wasWithinGeofence !== isWithin) {
+    if (isWithin) showToast("✅ आता तुम्ही \"" + assignedLocation.name + "\" या ठरलेल्या ठिकाणी आला आहात");
+    else showToast("⚠️ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणाबाहेर गेला आहात", "err");
+  }
+  wasWithinGeofence = isWithin;
 }
 
-async function tryGetGps() {
+let gpsWatchId = null;
+
+/** GPS एकदाच मिळवण्याऐवजी सतत (watchPosition) ट्रॅक करते — त्यामुळे
+ *  कर्मचारी हलला की अंतर व आत/बाहेर स्थिती आपोआप लाईव्ह अपडेट होते,
+ *  बटण दाबून पुन्हा-पुन्हा GPS मागवायची गरज नाही. */
+function tryGetGps() {
   gpsBox.className = "msg ok";
   gpsBox.textContent = "GPS तपासत आहे...";
   document.getElementById("gpsRetryBtn").style.display = "none";
-  try {
-    const coords = await getCurrentPosition();
-    currentCoords = coords;
-    gpsBox.textContent = "लोकेशन मिळाले ✓ (अचूकता: " + Math.round(coords.accuracy) + " मी.)";
-    updateButtonStates();
-    updateDistanceBox();
-  } catch (e) {
-    gpsBox.className = "msg err";
-    gpsBox.textContent = e.message;
-    document.getElementById("gpsRetryBtn").style.display = "block";
-  }
+
+  if (gpsWatchId !== null) stopWatchingPosition(gpsWatchId);
+  wasWithinGeofence = null;
+
+  gpsWatchId = watchPosition(
+    (coords) => {
+      currentCoords = coords;
+      gpsBox.className = "msg ok";
+      gpsBox.textContent = "लोकेशन मिळाले ✓ — लाईव्ह ट्रॅक होत आहे (अचूकता: " + Math.round(coords.accuracy) + " मी.)";
+      document.getElementById("gpsRetryBtn").style.display = "none";
+      updateButtonStates();
+      updateDistanceBox();
+    },
+    (err) => {
+      gpsBox.className = "msg err";
+      gpsBox.textContent = err.message;
+      document.getElementById("gpsRetryBtn").style.display = "block";
+    }
+  );
 }
 
 async function tryStartCamera() {
@@ -231,6 +261,9 @@ async function tryStartCamera() {
 
 document.getElementById("gpsRetryBtn").onclick = tryGetGps;
 document.getElementById("camRetryBtn").onclick = tryStartCamera;
+
+// पान बंद होताना/सोडताना लाईव्ह GPS ट्रॅकिंग थांबवा — बॅटरी वाचते
+window.addEventListener("pagehide", () => { if (gpsWatchId !== null) stopWatchingPosition(gpsWatchId); });
 
 document.getElementById("outdoorCheck").onchange = (e) => {
   document.getElementById("outdoorReasonWrap").style.display = e.target.checked ? "block" : "none";

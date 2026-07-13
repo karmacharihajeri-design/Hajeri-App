@@ -925,17 +925,95 @@ function updateSettings(req) {
 /* ---------------------------------------------------------
  * हजेरी पत्रक PDF जनरेट करणे — सुट्टी/रजा/सकाळ-दुपार हजेरी सर्व दाखवते
  * --------------------------------------------------------- */
+/** एकदाच सर्व आवश्यक शीट्स वाचून, दिवस/कर्मचारी यांच्या जोडीसाठी वेगाने
+ *  लुकअप करता येईल असा "cache" तयार करते. आधीच्या पद्धतीत प्रत्येक
+ *  दिवस × प्रत्येक कर्मचारी साठी Holidays/LeaveRequests/Settings शीट्स
+ *  नव्याने वाचल्या जात होत्या (उदा. ३० दिवस × ५० कर्मचारी = १५०० वेळा,
+ *  प्रत्येकी ३ शीट-वाचन = ४५०० स्लो कॉल्स) — त्यामुळेच PDF तयार व्हायला
+ *  खूप वेळ लागत होता. आता प्रत्येक शीट फक्त एकदाच वाचली जाते. */
+function buildReportCaches_() {
+  const settingsData = SHEET_SETTINGS.getDataRange().getValues();
+  const settingsMap = {};
+  for (let i = 1; i < settingsData.length; i++) settingsMap[settingsData[i][0]] = normalizeSettingValue_(settingsData[i][1]);
+
+  const offRaw = settingsMap['WeeklyOffDays'] || '0,6';
+  const weeklyOffDays = String(offRaw).split(',').map(s => Number(String(s).trim())).filter(n => !isNaN(n));
+
+  const holidayMap = {}; // dateStr -> name
+  const holidayData = SHEET_HOLIDAYS.getDataRange().getValues();
+  for (let i = 1; i < holidayData.length; i++) {
+    const dStr = normalizeDateStr_(holidayData[i][0]);
+    if (dStr) holidayMap[dStr] = holidayData[i][1] || 'सार्वजनिक सुट्टी';
+  }
+
+  const leavesByMobile = {}; // mobile -> [{from, to}]
+  const leaveData = SHEET_LEAVES.getDataRange().getValues();
+  for (let i = 1; i < leaveData.length; i++) {
+    if (leaveData[i][6] !== 'Active') continue;
+    const mob = String(leaveData[i][0]);
+    if (!leavesByMobile[mob]) leavesByMobile[mob] = [];
+    leavesByMobile[mob].push({ from: normalizeDateStr_(leaveData[i][2]), to: normalizeDateStr_(leaveData[i][3]) });
+  }
+
+  const attByKey = {}; // "dateStr|mobile" -> row
+  const attData = SHEET_ATTENDANCE.getDataRange().getValues();
+  for (let i = 1; i < attData.length; i++) {
+    const dStr = normalizeDateStr_(attData[i][0]);
+    attByKey[dStr + '|' + String(attData[i][1])] = attData[i];
+  }
+
+  return { settingsMap, weeklyOffDays, holidayMap, leavesByMobile, attByKey };
+}
+
+function isWeeklyOffFast_(dateObj, caches) {
+  return caches.weeklyOffDays.indexOf(dateObj.getDay()) !== -1;
+}
+
+function getHolidayNameFast_(dateStr, caches) {
+  return caches.holidayMap[dateStr] || null;
+}
+
+function getActiveLeaveForDateFast_(mobileNumber, dateStr, caches) {
+  const list = caches.leavesByMobile[String(mobileNumber)];
+  if (!list) return false;
+  for (const l of list) if (dateStr >= l.from && dateStr <= l.to) return true;
+  return false;
+}
+
+/** resolveDayStatus_ चीच लॉजिक, फक्त पूर्व-वाचलेल्या caches वापरून — दर
+ *  दिवस/कर्मचाऱ्यासाठी शीट पुन्हा वाचावी लागत नाही म्हणून खूप वेगवान. */
+function resolveDayStatusFast_(dateObj, dateStr, mobileNumber, attRow, caches) {
+  if (isWeeklyOffFast_(dateObj, caches)) return { status: 'साप्ताहिक सुट्टी', category: 'holiday' };
+  const holidayName = getHolidayNameFast_(dateStr, caches);
+  if (holidayName) return { status: 'सुट्टी: ' + holidayName, category: 'holiday' };
+  if (getActiveLeaveForDateFast_(mobileNumber, dateStr, caches)) return { status: 'रजा', category: 'leave' };
+
+  if (attRow) {
+    const hasMorning = !!attRow[2];
+    const hasAfternoon = !!attRow[5];
+    if (hasMorning && hasAfternoon) return { status: 'पूर्ण हजेरी', category: 'present' };
+    if (hasMorning) return { status: 'सकाळची अर्धी हजेरी', category: 'half' };
+    if (hasAfternoon) return { status: 'दुपारची अर्धी हजेरी', category: 'half' };
+  }
+  return { status: 'गैरहजर', category: 'absent' };
+}
+
 function generateAttendanceReport(req) {
   const auth = requireRole_(req.actorMobile, ['admin', 'developer']);
   if (!auth.ok) return { success: false, message: auth.message };
 
-  const usersData = SHEET_USERS.getDataRange().getValues();
-  const attData = SHEET_ATTENDANCE.getDataRange().getValues();
+  const todayStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (req.fromDate > todayStr || req.toDate > todayStr) {
+    return { success: false, message: 'आजच्या तारखेपुढील तारखेसाठी पत्रक तयार करता येणार नाही' };
+  }
 
-  const appName = getSetting_('AppName') || 'संस्थेचे नाव';
-  const orgAddress = getSetting_('OrgAddress') || '';
-  const officerName = getSetting_('GramPanchayatOfficerName') || '';
-  const sarpanchName = getSetting_('SarpanchName') || '';
+  const usersData = SHEET_USERS.getDataRange().getValues();
+  const caches = buildReportCaches_(); // सर्व शीट्स इथे फक्त एकदाच वाचल्या जातात
+
+  const appName = caches.settingsMap['AppName'] || 'संस्थेचे नाव';
+  const orgAddress = caches.settingsMap['OrgAddress'] || '';
+  const officerName = caches.settingsMap['GramPanchayatOfficerName'] || '';
+  const sarpanchName = caches.settingsMap['SarpanchName'] || '';
 
   let targetUsers = [];
   if (req.mobileNumber === 'all') {
@@ -948,7 +1026,7 @@ function generateAttendanceReport(req) {
 
   let fullHtml = '';
   targetUsers.forEach(u => {
-    fullHtml += buildEmployeeReportHtml_(u, attData, req.fromDate, req.toDate, appName, orgAddress, officerName, sarpanchName);
+    fullHtml += buildEmployeeReportHtml_(u, caches, req.fromDate, req.toDate, appName, orgAddress, officerName, sarpanchName);
     fullHtml += '<div style="page-break-after: always;"></div>';
   });
 
@@ -969,7 +1047,7 @@ function generateAttendanceReport(req) {
   };
 }
 
-function buildEmployeeReportHtml_(user, attData, fromDate, toDate, appName, orgAddress, officerName, sarpanchName) {
+function buildEmployeeReportHtml_(user, caches, fromDate, toDate, appName, orgAddress, officerName, sarpanchName) {
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy');
   const from = new Date(fromDate);
   const to = new Date(toDate);
@@ -984,12 +1062,9 @@ function buildEmployeeReportHtml_(user, attData, fromDate, toDate, appName, orgA
     const dDisplay = Utilities.formatDate(dCopy, Session.getScriptTimeZone(), 'dd-MM-yyyy');
     const dayName = weekDays[dCopy.getDay()];
 
-    let attRow = null;
-    for (let i = 1; i < attData.length; i++) {
-      if (normalizeDateStr_(attData[i][0]) === dStr && String(attData[i][1]) === String(user.mobile)) { attRow = attData[i]; break; }
-    }
+    const attRow = caches.attByKey[dStr + '|' + String(user.mobile)] || null;
 
-    const resolved = resolveDayStatus_(dCopy, dStr, user.mobile, attRow);
+    const resolved = resolveDayStatusFast_(dCopy, dStr, user.mobile, attRow, caches);
     const status = resolved.status;
 
     let timeInfo = '-';
