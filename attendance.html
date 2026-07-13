@@ -24,6 +24,7 @@
   <div id="workingUI">
     <div id="gpsBox" class="msg ok">GPS तपासत आहे...</div>
     <button class="outline" id="gpsRetryBtn" style="display:none;">📍 GPS पुन्हा मिळवा</button>
+    <div id="distanceBox" style="display:none;font-size:12.5px;text-align:center;font-weight:700;margin-top:8px;padding:8px;border-radius:8px;"></div>
 
     <div class="video-frame"><video id="video" autoplay muted playsinline></video></div>
     <div class="face-status" id="faceStatus">कॅमेरा सुरू होत आहे...</div>
@@ -34,10 +35,10 @@
     </p>
 
     <button class="primary" id="morningBtn" disabled>🌅 सकाळची हजेरी</button>
-    <div id="morningWindowLbl" style="font-size:11px;text-align:center;color:#6b6a63;margin:4px 0 0;"></div>
+    <div id="morningWindowLbl" class="schedule-badge"></div>
 
     <button class="primary" id="afternoonBtn" disabled style="margin-top:16px;">🌇 दुपारची हजेरी</button>
-    <div id="afternoonWindowLbl" style="font-size:11px;text-align:center;color:#6b6a63;margin:4px 0 0;"></div>
+    <div id="afternoonWindowLbl" class="schedule-badge"></div>
 
     <div class="card" id="outdoorCard" style="margin-top:16px;">
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-top:0;">
@@ -92,9 +93,10 @@ let enrolledDescriptors = null;
 let currentCoords = null;
 let faceMatched = false;
 let dayStatus = null;
-let stableCount = 0;
+let assignedLocation = null;
+let hitCount = 0;
 let autoSubmitting = false;
-const STABLE_FRAMES_NEEDED = 3; // सलग ३ फ्रेम्स (~१.८ सेकंद) चेहरा जुळला की आपोआप हजेरी नोंदवली जाते
+const STABLE_HITS_NEEDED = 4; // एकत्रित हिट्स (चुकलेल्या फ्रेमने फक्त १ ने कमी होतात, शून्यावर रीसेट होत नाही)
 
 if (isAssisted) {
   document.getElementById("userNameLbl").textContent = "साहाय्यक हजेरी — मोबाईल: " + mobile;
@@ -129,9 +131,10 @@ async function loadDayStatus() {
   }
 
   document.getElementById("morningWindowLbl").textContent =
-    "वेळ: " + res.morningWindow[0] + " ते " + res.morningWindow[1];
+    "🌅 सकाळ: " + res.morningWindow[0] + " ते " + res.morningWindow[1];
   document.getElementById("afternoonWindowLbl").textContent =
-    "वेळ: " + res.afternoonWindow[0] + " ते " + res.afternoonWindow[1];
+    "🌇 दुपार: " + res.afternoonWindow[0] + " ते " + res.afternoonWindow[1];
+  assignedLocation = res.assignedLocation || null;
   return true;
 }
 
@@ -167,6 +170,33 @@ function updateButtonStates() {
 }
 setInterval(updateButtonStates, 15000); // वेळेची कक्षा ओलांडली/सुरू झाली की बटण आपोआप अपडेट व्हावे
 
+/** कर्मचारी नेमून दिलेल्या ठिकाणापासून किती लांब आहे हे स्क्रीनवर लाईव्ह दाखवते */
+function updateDistanceBox() {
+  const box = document.getElementById("distanceBox");
+  if (!assignedLocation || !currentCoords) { box.style.display = "none"; return; }
+
+  const isOutdoor = document.getElementById("outdoorCheck").checked;
+  box.style.display = "block";
+
+  if (isOutdoor) {
+    box.style.background = "var(--saffron-pale)";
+    box.style.color = "#7a5300";
+    box.textContent = "📍 कामानिमित्त बाहेर मोड सुरू — अंतराची अट तपासली जाणार नाही";
+    return;
+  }
+
+  const dist = distanceMeters(currentCoords.latitude, currentCoords.longitude, assignedLocation.lat, assignedLocation.lon);
+  if (dist <= assignedLocation.radiusMeters) {
+    box.style.background = "var(--green-pale)";
+    box.style.color = "var(--green-deep)";
+    box.textContent = "✅ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणी आहात";
+  } else {
+    box.style.background = "var(--maroon-pale)";
+    box.style.color = "var(--maroon)";
+    box.textContent = "⚠️ तुम्ही \"" + assignedLocation.name + "\" पासून " + Math.round(dist) + " मी. लांब आहात — कृपया जवळ जा";
+  }
+}
+
 async function tryGetGps() {
   gpsBox.className = "msg ok";
   gpsBox.textContent = "GPS तपासत आहे...";
@@ -176,6 +206,7 @@ async function tryGetGps() {
     currentCoords = coords;
     gpsBox.textContent = "लोकेशन मिळाले ✓ (अचूकता: " + Math.round(coords.accuracy) + " मी.)";
     updateButtonStates();
+    updateDistanceBox();
   } catch (e) {
     gpsBox.className = "msg err";
     gpsBox.textContent = e.message;
@@ -203,6 +234,7 @@ document.getElementById("camRetryBtn").onclick = tryStartCamera;
 
 document.getElementById("outdoorCheck").onchange = (e) => {
   document.getElementById("outdoorReasonWrap").style.display = e.target.checked ? "block" : "none";
+  updateDistanceBox();
 };
 
 async function init() {
@@ -222,7 +254,11 @@ async function init() {
 }
 
 async function detectLoop() {
-  if (autoSubmitting) { setTimeout(detectLoop, 600); return; }
+  // कॅमेऱ्यासमोर सक्रियपणे चेहरा शोधणं चालू आहे — हीदेखील "activity" धरून
+  // standby (निष्क्रियता) टायमरमुळे मध्येच लॉगआउट होऊ नये
+  if (typeof window.pingStandbyActivity === "function") window.pingStandbyActivity();
+
+  if (autoSubmitting) { setTimeout(detectLoop, 300); return; }
 
   const descriptor = await detectFaceDescriptor(video);
   if (descriptor) {
@@ -230,25 +266,25 @@ async function detectLoop() {
     currentDescriptor = descriptor;
     faceMatched = match;
     if (match) {
-      stableCount++;
-      faceStatus.textContent = stableCount >= STABLE_FRAMES_NEEDED
+      hitCount = Math.min(STABLE_HITS_NEEDED, hitCount + 1);
+      faceStatus.textContent = hitCount >= STABLE_HITS_NEEDED
         ? "चेहरा जुळला ✓ — हजेरी नोंदवत आहे..."
         : "चेहरा जुळला ✓ — स्थिर रहा...";
       faceStatus.className = "face-status face-ok";
     } else {
-      stableCount = 0;
+      hitCount = Math.max(0, hitCount - 1); // एखादी फ्रेम चुकली तरी पूर्ण प्रगती वाया जाऊ नये
       faceStatus.textContent = "चेहरा जुळत नाही — हा नोंदवलेला कर्मचारी दिसत नाही";
       faceStatus.className = "face-status face-no";
     }
   } else {
     faceMatched = false;
-    stableCount = 0;
+    hitCount = Math.max(0, hitCount - 1);
     faceStatus.textContent = "चेहरा शोधत आहे...";
     faceStatus.className = "face-status face-no";
   }
   updateButtonStates();
   maybeAutoSubmit();
-  setTimeout(detectLoop, 600);
+  setTimeout(detectLoop, 300);
 }
 
 /** चेहरा स्थिर जुळला, वेळ योग्य आहे, GPS मिळालाय — तर बटण न दाबताच आपोआप
@@ -256,7 +292,7 @@ async function detectLoop() {
  *  लिहिणं आवश्यक — रिकामं असेपर्यंत आपोआप पाठवलं जात नाही.) */
 function maybeAutoSubmit() {
   if (autoSubmitting || !dayStatus || dayStatus.dayType !== "working" || !currentCoords) return;
-  if (stableCount < STABLE_FRAMES_NEEDED) return;
+  if (hitCount < STABLE_HITS_NEEDED) return;
 
   const isOutdoor = document.getElementById("outdoorCheck").checked;
   const outdoorReason = document.getElementById("outdoorReasonInput").value.trim();
@@ -267,7 +303,7 @@ function maybeAutoSubmit() {
   else if (!dayStatus.afternoonDone && withinWindowNow_(dayStatus.afternoonWindow)) sessionToTry = "afternoon";
   if (!sessionToTry) return;
 
-  stableCount = 0;
+  hitCount = 0;
   submit(sessionToTry);
 }
 

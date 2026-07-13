@@ -73,6 +73,7 @@ function doExit() {
       ["click", "touchstart", "keydown", "mousemove", "scroll"].forEach(evt =>
         document.addEventListener(evt, resetIdleTimer_, { passive: true })
       );
+      window.pingStandbyActivity = resetIdleTimer_; // कॅमेरा-चालू पानांवरून (चेहरा शोधताना) activity म्हणून वापरण्यासाठी
       resetIdleTimer_();
     } catch (e) {
       // सेटिंग्ज न मिळाल्यास standby बंदच राहील — अॅप वापरण्यास अडथळा येत नाही

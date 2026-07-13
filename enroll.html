@@ -69,9 +69,9 @@ const POSES = [
   "थोडं खाली पहा",
 ];
 
-const STABLE_FRAMES_NEEDED = 3; // सलग ३ फ्रेम्स (~१.२ सेकंद) चेहरा स्थिर दिसला की आपोआप कॅप्चर
+const STABLE_HITS_NEEDED = 4; // एकत्रित हिट्स (चुकलेल्या फ्रेमने फक्त १ ने कमी होतात, शून्यावर रीसेट होत नाही)
 let poseIndex = 0;
-let stableCount = 0;
+let hitCount = 0;
 let capturing = false; // पुढच्या पोझकडे वळण्यासाठी थोडा वेळ — या दरम्यान नवीन कॅप्चर टाळायचे
 const collectedDescriptors = [];
 
@@ -104,27 +104,31 @@ function updatePoseUI() {
 }
 
 async function detectLoop() {
-  if (capturing) { setTimeout(detectLoop, 400); return; }
+  // कॅमेऱ्यासमोर सक्रियपणे चेहरा शोधणं चालू आहे — हीदेखील "activity" धरून
+  // standby (निष्क्रियता) टायमरमुळे मध्येच लॉगआउट होऊ नये
+  if (typeof window.pingStandbyActivity === "function") window.pingStandbyActivity();
+
+  if (capturing) { setTimeout(detectLoop, 300); return; }
 
   const descriptor = await detectFaceDescriptor(video);
   if (descriptor) {
-    stableCount++;
-    if (stableCount >= STABLE_FRAMES_NEEDED) {
+    hitCount = Math.min(STABLE_HITS_NEEDED, hitCount + 1);
+    if (hitCount >= STABLE_HITS_NEEDED) {
       faceStatus.textContent = "चेहरा ओळखला ✓ — कॅप्चर होत आहे...";
       faceStatus.className = "face-status face-ok";
-      stableCount = 0;
+      hitCount = 0;
       autoCapture(descriptor);
-      setTimeout(detectLoop, 400);
+      setTimeout(detectLoop, 300);
       return;
     }
     faceStatus.textContent = "चेहरा ओळखला ✓ — स्थिर रहा...";
     faceStatus.className = "face-status face-ok";
   } else {
-    stableCount = 0;
+    hitCount = Math.max(0, hitCount - 1); // एखादी फ्रेम चुकली तरी पूर्ण प्रगती वाया जाऊ नये
     faceStatus.textContent = "चेहरा शोधत आहे...";
     faceStatus.className = "face-status face-no";
   }
-  setTimeout(detectLoop, 400);
+  setTimeout(detectLoop, 300);
 }
 
 function autoCapture(descriptor) {

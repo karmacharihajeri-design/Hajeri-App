@@ -543,12 +543,31 @@ function getTodayStatus(mobileNumber) {
     }
   }
 
+  // कर्मचाऱ्याचं नेमून दिलेलं ठिकाण — फ्रंटएंडला "तुम्ही किती लांब आहात" हे
+  // लाईव्ह दाखवण्यासाठी लागतं
+  let assignedLocation = null;
+  const usersData = SHEET_USERS.getDataRange().getValues();
+  let locationId = null;
+  for (let i = 1; i < usersData.length; i++) {
+    if (String(usersData[i][0]) === String(mobileNumber)) { locationId = usersData[i][3]; break; }
+  }
+  if (locationId) {
+    const locData = SHEET_LOCATIONS.getDataRange().getValues();
+    for (let i = 1; i < locData.length; i++) {
+      if (String(locData[i][0]) === String(locationId)) {
+        assignedLocation = { name: locData[i][1], lat: locData[i][2], lon: locData[i][3], radiusMeters: locData[i][4] };
+        break;
+      }
+    }
+  }
+
   return {
     success: true,
     dayType: 'working',
     morningDone, afternoonDone,
     morningWindow: [getSetting_('MorningStartTime') || '09:00', getSetting_('MorningEndTime') || '11:00'],
     afternoonWindow: [getSetting_('AfternoonStartTime') || '15:30', getSetting_('AfternoonEndTime') || '19:00'],
+    assignedLocation,
   };
 }
 

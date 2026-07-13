@@ -12,6 +12,10 @@ async function loadFaceModels() {
   modelsLoaded = true;
 }
 
+// चेहरा शोधण्यासाठी: छोटा inputSize म्हणजे जलद गणित (जवळून घेतलेल्या सेल्फी-कॅमेरा
+// फोटोंसाठी अचूकतेत फरक पडत नाही), आणि किंचित कमी scoreThreshold म्हणजे थोडा
+// प्रकाश कमी/कोन वेगळा असला तरी चेहरा लवकर सापडतो.
+
 /** व्हिडिओ एलिमेंटमधून सध्या चेहरा दिसतो आहे का व त्याचा descriptor मिळवते */
 async function detectFaceDescriptor(videoEl) {
   // व्हिडिओला अजून प्रत्यक्ष फ्रेम्स मिळालेल्या नसतील (videoWidth/Height = 0)
@@ -22,7 +26,7 @@ async function detectFaceDescriptor(videoEl) {
   }
   try {
     const detection = await faceapi
-      .detectSingleFace(videoEl, new faceapi.TinyFaceDetectorOptions())
+      .detectSingleFace(videoEl, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.4 }))
       .withFaceLandmarks()
       .withFaceDescriptor();
     return detection ? detection.descriptor : null; // Float32Array (128 अंकी)
