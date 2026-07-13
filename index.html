@@ -92,9 +92,19 @@ document.getElementById("mobileInput").addEventListener("keydown", (e) => {
  *  पान साफ करून "अॅप बंद झाला" असा स्पष्ट पूर्ण-स्क्रीन संदेश दाखवला जातो,
  *  जेणेकरून अॅप खरोखर बंद झाल्यासारखं वाटेल. */
 document.getElementById("exitBtn").onclick = () => {
-  window.open("", "_self");
-  window.close();
+  // शक्य तितक्या पद्धतींनी टॅब/विंडो/अॅप बंद करण्याचा प्रयत्न — संदर्भानुसार
+  // (सामान्य ब्राउझर टॅब / होम-स्क्रीनवर अॅड केलेला PWA / WebView) यातील
+  // एखादी पद्धत काम करू शकते.
+  try { window.open("", "_self"); } catch (e) {}
+  try { window.close(); } catch (e) {}
+  try { self.close(); } catch (e) {}
+  try { window.top.close(); } catch (e) {}
+  try { if (navigator.app && navigator.app.exitApp) navigator.app.exitApp(); } catch (e) {}
+
   setTimeout(() => {
+    // वरीलपैकी कशानेही टॅब प्रत्यक्ष बंद झाला नसेल (सर्वसामान्य ब्राउझर
+    // सुरक्षिततेमुळे — कुठल्याही वेबसाईटला स्वतःहून हे बदलता येत नाही),
+    // तर संपूर्ण पान साफ करून अॅप खरोखर बंद झाल्यासारखा स्पष्ट संदेश दाखवा
     document.open();
     document.write(
       '<!DOCTYPE html><html lang="mr"><head><meta charset="UTF-8">' +

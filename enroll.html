@@ -9,6 +9,10 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="back-btn-row">
+    <button class="back-btn" onclick="history.back()">← मागे जा</button>
+  </div>
+
   <div class="topbar" style="background:var(--maroon);">
     <h1>चेहरा नोंदणी</h1>
     <p id="userNameLbl"></p>
@@ -17,8 +21,8 @@
 
   <p style="font-size:12px;text-align:center;">
     दाढी वाढली, चष्मा घातला किंवा कोन बदलला तरी ओळख होण्यासाठी
-    <b>५ वेगवेगळ्या पोझमध्ये</b> चेहरा नोंदवला जाईल. सूचनेप्रमाणे मान वळवा
-    आणि प्रत्येक वेळी "हा कोन कॅप्चर करा" दाबा.
+    <b>५ वेगवेगळ्या पोझमध्ये</b> चेहरा आपोआप नोंदवला जाईल — फक्त सूचनेप्रमाणे
+    मान वळवा व स्थिर रहा, कुठलंही बटण दाबायची गरज नाही.
   </p>
 
   <div style="text-align:center;margin-top:10px;">
@@ -32,12 +36,8 @@
   <div class="face-status" id="faceStatus">कॅमेरा सुरू होत आहे...</div>
   <div id="msgBox"></div>
 
-  <button class="primary" id="captureBtn" disabled>हा कोन कॅप्चर करा</button>
-  <button class="primary" id="finishBtn" style="display:none;">चेहरा नोंदणी पूर्ण करा</button>
-
   <div class="nav">
     <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
-    <button class="danger" onclick="doExit()" style="width:auto;padding:8px 16px;">बाहेर पडा</button>
   </div>
 </div>
 
@@ -46,6 +46,7 @@
 <script src="auth-guard.js"></script>
 <script src="settings-sync.js"></script>
 <script src="face-utils.js"></script>
+<script src="ui-utils.js"></script>
 <script>
 const loggedInMobile = localStorage.getItem("mobileNumber");
 const loggedInRole = localStorage.getItem("role");
@@ -57,8 +58,6 @@ const mobile = isAssisted ? assistedMobile : loggedInMobile;
 const video = document.getElementById("video");
 const faceStatus = document.getElementById("faceStatus");
 const msgBox = document.getElementById("msgBox");
-const captureBtn = document.getElementById("captureBtn");
-const finishBtn = document.getElementById("finishBtn");
 const progressLbl = document.getElementById("progressLbl");
 const poseInstruction = document.getElementById("poseInstruction");
 
@@ -70,8 +69,10 @@ const POSES = [
   "थोडं खाली पहा",
 ];
 
+const STABLE_FRAMES_NEEDED = 3; // सलग ३ फ्रेम्स (~१.२ सेकंद) चेहरा स्थिर दिसला की आपोआप कॅप्चर
 let poseIndex = 0;
-let currentDescriptor = null;
+let stableCount = 0;
+let capturing = false; // पुढच्या पोझकडे वळण्यासाठी थोडा वेळ — या दरम्यान नवीन कॅप्चर टाळायचे
 const collectedDescriptors = [];
 
 document.getElementById("userNameLbl").textContent = isAssisted
@@ -103,59 +104,77 @@ function updatePoseUI() {
 }
 
 async function detectLoop() {
+  if (capturing) { setTimeout(detectLoop, 400); return; }
+
   const descriptor = await detectFaceDescriptor(video);
   if (descriptor) {
-    currentDescriptor = descriptor;
-    faceStatus.textContent = "चेहरा ओळखला ✓ — आता कॅप्चर करा";
+    stableCount++;
+    if (stableCount >= STABLE_FRAMES_NEEDED) {
+      faceStatus.textContent = "चेहरा ओळखला ✓ — कॅप्चर होत आहे...";
+      faceStatus.className = "face-status face-ok";
+      stableCount = 0;
+      autoCapture(descriptor);
+      setTimeout(detectLoop, 400);
+      return;
+    }
+    faceStatus.textContent = "चेहरा ओळखला ✓ — स्थिर रहा...";
     faceStatus.className = "face-status face-ok";
-    captureBtn.disabled = false;
   } else {
-    currentDescriptor = null;
+    stableCount = 0;
     faceStatus.textContent = "चेहरा शोधत आहे...";
     faceStatus.className = "face-status face-no";
-    captureBtn.disabled = true;
   }
-  setTimeout(detectLoop, 500);
+  setTimeout(detectLoop, 400);
 }
 
-captureBtn.onclick = () => {
-  if (!currentDescriptor) return;
-  collectedDescriptors.push(Array.from(currentDescriptor));
+function autoCapture(descriptor) {
+  capturing = true;
+  collectedDescriptors.push(Array.from(descriptor));
+  showToast("✓ \"" + POSES[poseIndex] + "\" कॅप्चर झाले!");
   msgBox.innerHTML = '<div class="msg ok">' + POSES[poseIndex] + ' — कॅप्चर झाले ✓</div>';
 
   poseIndex++;
   if (poseIndex < POSES.length) {
     updatePoseUI();
-    captureBtn.disabled = true;
+    faceStatus.textContent = "पुढच्या पोझसाठी तयार व्हा...";
+    setTimeout(() => { capturing = false; }, 1800); // पुढच्या पोझकडे वळण्यासाठी थोडा वेळ
   } else {
-    // सर्व ५ कोन झाले
     poseInstruction.textContent = "सर्व कोन कॅप्चर झाले ✓";
     progressLbl.textContent = POSES.length + " / " + POSES.length;
-    captureBtn.style.display = "none";
-    finishBtn.style.display = "block";
+    faceStatus.textContent = "नोंदणी पूर्ण होत आहे...";
+    setTimeout(finishEnrollment, 900);
   }
-};
+}
 
-finishBtn.onclick = async () => {
-  finishBtn.disabled = true;
+async function finishEnrollment() {
   msgBox.innerHTML = '<div class="msg ok">नोंदवत आहे...</div>';
   try {
     const res = await Api.enrollFace(mobile, collectedDescriptors);
     if (res.success) {
       if (!isAssisted) localStorage.setItem("faceEnrolled", "1");
+      showToast("✅ चेहरा यशस्वीरित्या नोंदवला!");
       msgBox.innerHTML = '<div class="msg ok">चेहरा यशस्वीरित्या नोंदवला!</div>';
       setTimeout(() => {
         window.location.href = isAssisted ? "admin.html" : "attendance.html";
       }, 1200);
     } else {
       msgBox.innerHTML = '<div class="msg err">' + res.message + '</div>';
-      finishBtn.disabled = false;
+      showToast(res.message, "err");
+      const retryBtn = document.createElement("button");
+      retryBtn.className = "primary";
+      retryBtn.textContent = "पुन्हा प्रयत्न करा";
+      retryBtn.onclick = finishEnrollment;
+      msgBox.appendChild(retryBtn);
     }
   } catch (e) {
     msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
-    finishBtn.disabled = false;
+    const retryBtn = document.createElement("button");
+    retryBtn.className = "primary";
+    retryBtn.textContent = "पुन्हा प्रयत्न करा";
+    retryBtn.onclick = finishEnrollment;
+    msgBox.appendChild(retryBtn);
   }
-};
+}
 
 if (!mobile) window.location.href = "index.html";
 else init();

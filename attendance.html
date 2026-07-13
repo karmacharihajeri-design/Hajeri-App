@@ -9,6 +9,10 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="back-btn-row">
+    <button class="back-btn" onclick="history.back()">← मागे जा</button>
+  </div>
+
   <div class="topbar" style="background:var(--maroon);">
     <h1>हजेरी — सकाळ / दुपार</h1>
     <p id="userNameLbl"></p>
@@ -25,6 +29,9 @@
     <div class="face-status" id="faceStatus">कॅमेरा सुरू होत आहे...</div>
     <button class="outline" id="camRetryBtn" style="display:none;">📷 कॅमेरा पुन्हा सुरू करा</button>
     <div id="msgBox"></div>
+    <p style="font-size:11.5px;text-align:center;color:#6b6a63;margin:10px 0 0;">
+      चेहरा स्क्रीनसमोर स्थिर ठेवा — हजेरी आपोआप नोंदवली जाईल, बटण दाबायची गरज नाही.
+    </p>
 
     <button class="primary" id="morningBtn" disabled>🌅 सकाळची हजेरी</button>
     <div id="morningWindowLbl" style="font-size:11px;text-align:center;color:#6b6a63;margin:4px 0 0;"></div>
@@ -48,7 +55,6 @@
 
   <div class="nav">
     <button class="outline" onclick="doLogout()" style="width:auto;padding:8px 16px;">लॉगआउट</button>
-    <button class="danger" onclick="doExit()" style="width:auto;padding:8px 16px;">बाहेर पडा</button>
   </div>
   <div class="nav" style="margin-top:8px;">
     <a href="leave.html">🗓️ रजेसाठी अर्ज</a>
@@ -62,6 +68,7 @@
 <script src="settings-sync.js"></script>
 <script src="face-utils.js"></script>
 <script src="geo.js"></script>
+<script src="ui-utils.js"></script>
 <script>
 const loggedInMobile = localStorage.getItem("mobileNumber");
 const loggedInRole = localStorage.getItem("role");
@@ -85,6 +92,9 @@ let enrolledDescriptors = null;
 let currentCoords = null;
 let faceMatched = false;
 let dayStatus = null;
+let stableCount = 0;
+let autoSubmitting = false;
+const STABLE_FRAMES_NEEDED = 3; // सलग ३ फ्रेम्स (~१.८ सेकंद) चेहरा जुळला की आपोआप हजेरी नोंदवली जाते
 
 if (isAssisted) {
   document.getElementById("userNameLbl").textContent = "साहाय्यक हजेरी — मोबाईल: " + mobile;
@@ -212,25 +222,53 @@ async function init() {
 }
 
 async function detectLoop() {
+  if (autoSubmitting) { setTimeout(detectLoop, 600); return; }
+
   const descriptor = await detectFaceDescriptor(video);
   if (descriptor) {
     const { match } = isSameFaceMulti(descriptor, enrolledDescriptors);
     currentDescriptor = descriptor;
     faceMatched = match;
     if (match) {
-      faceStatus.textContent = "चेहरा जुळला ✓ (नोंदवलेला कर्मचारीच)";
+      stableCount++;
+      faceStatus.textContent = stableCount >= STABLE_FRAMES_NEEDED
+        ? "चेहरा जुळला ✓ — हजेरी नोंदवत आहे..."
+        : "चेहरा जुळला ✓ — स्थिर रहा...";
       faceStatus.className = "face-status face-ok";
     } else {
+      stableCount = 0;
       faceStatus.textContent = "चेहरा जुळत नाही — हा नोंदवलेला कर्मचारी दिसत नाही";
       faceStatus.className = "face-status face-no";
     }
   } else {
     faceMatched = false;
+    stableCount = 0;
     faceStatus.textContent = "चेहरा शोधत आहे...";
     faceStatus.className = "face-status face-no";
   }
   updateButtonStates();
+  maybeAutoSubmit();
   setTimeout(detectLoop, 600);
+}
+
+/** चेहरा स्थिर जुळला, वेळ योग्य आहे, GPS मिळालाय — तर बटण न दाबताच आपोआप
+ *  त्या सत्राची हजेरी नोंदवते. (Outdoor Duty निवडलेलं असल्यास आधी कारण
+ *  लिहिणं आवश्यक — रिकामं असेपर्यंत आपोआप पाठवलं जात नाही.) */
+function maybeAutoSubmit() {
+  if (autoSubmitting || !dayStatus || dayStatus.dayType !== "working" || !currentCoords) return;
+  if (stableCount < STABLE_FRAMES_NEEDED) return;
+
+  const isOutdoor = document.getElementById("outdoorCheck").checked;
+  const outdoorReason = document.getElementById("outdoorReasonInput").value.trim();
+  if (isOutdoor && !outdoorReason) return;
+
+  let sessionToTry = null;
+  if (!dayStatus.morningDone && withinWindowNow_(dayStatus.morningWindow)) sessionToTry = "morning";
+  else if (!dayStatus.afternoonDone && withinWindowNow_(dayStatus.afternoonWindow)) sessionToTry = "afternoon";
+  if (!sessionToTry) return;
+
+  stableCount = 0;
+  submit(sessionToTry);
 }
 
 async function submit(session) {
@@ -245,6 +283,7 @@ async function submit(session) {
     return;
   }
 
+  autoSubmitting = true;
   morningBtn.disabled = true;
   afternoonBtn.disabled = true;
   msgBox.innerHTML = '<div class="msg ok">पाठवत आहे...</div>';
@@ -263,6 +302,7 @@ async function submit(session) {
     msgBox.innerHTML = res.success
       ? '<div class="msg ok">' + res.message + '</div>'
       : '<div class="msg err">' + res.message + '</div>';
+    showToast(res.success ? "✓ " + res.message : res.message, res.success ? undefined : "err");
     if (res.success) {
       if (session === "morning") dayStatus.morningDone = true;
       else dayStatus.afternoonDone = true;
@@ -273,6 +313,7 @@ async function submit(session) {
   } catch (e) {
     msgBox.innerHTML = '<div class="msg err">त्रुटी: ' + e.message + '</div>';
   }
+  autoSubmitting = false;
   updateButtonStates();
 }
 
