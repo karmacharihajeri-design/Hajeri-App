@@ -706,8 +706,9 @@ function markAttendance(req) {
     newRow[colNote - 1] = noteValue;
     SHEET_ATTENDANCE.appendRow(newRow);
     rowIndex = SHEET_ATTENDANCE.getLastRow();
+    SHEET_ATTENDANCE.getRange(rowIndex, colTime).setNumberFormat('@').setValue(timeStr); // वेळ Date मध्ये बदलू नये म्हणून Plain text
   } else {
-    SHEET_ATTENDANCE.getRange(rowIndex, colTime).setValue(timeStr);
+    SHEET_ATTENDANCE.getRange(rowIndex, colTime).setNumberFormat('@').setValue(timeStr);
     SHEET_ATTENDANCE.getRange(rowIndex, colPhoto).setValue(photoUrl);
     SHEET_ATTENDANCE.getRange(rowIndex, colGps).setValue(gpsStr);
     SHEET_ATTENDANCE.getRange(rowIndex, colNote).setValue(noteValue);
@@ -1047,51 +1048,114 @@ function generateAttendanceReport(req) {
   };
 }
 
+/** शीटमध्ये वेळ "HH:mm:ss" टाईप/लिहिली की Google Sheets तीही सेटिंग्जप्रमाणेच
+ *  आपोआप Date/Time मूल्यात बदलू शकते — त्यामुळे हे फंक्शन दोन्ही
+ *  प्रकार (Date object किंवा plain "HH:mm:ss" स्ट्रिंग) हाताळून योग्य
+ *  "hh:mm AM/PM" स्वरूपात दाखवते. */
+function formatTimeAmPm_(val) {
+  if (!val) return '-';
+  if (val instanceof Date) return Utilities.formatDate(val, Session.getScriptTimeZone(), 'hh:mm a');
+  const parts = String(val).split(':');
+  let h = parseInt(parts[0], 10);
+  const m = parts[1] || '00';
+  if (isNaN(h)) return String(val);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  return (h < 10 ? '0' + h : String(h)) + ':' + m + ' ' + ampm;
+}
+
 function buildEmployeeReportHtml_(user, caches, fromDate, toDate, appName, orgAddress, officerName, sarpanchName) {
   const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd-MM-yyyy');
   const from = new Date(fromDate);
   const to = new Date(toDate);
-
-  let rows = '';
-  let presentDays = 0, absentDays = 0, holidayDays = 0, leaveDays = 0;
   const weekDays = ['रविवार', 'सोमवार', 'मंगळवार', 'बुधवार', 'गुरुवार', 'शुक्रवार', 'शनिवार'];
 
+  // ---- पायरी १: प्रत्येक दिवसाची कच्ची (raw) स्थिती ठरवणे ----
+  const days = [];
   for (let d = new Date(from); d <= to; d.setDate(d.getDate() + 1)) {
     const dCopy = new Date(d);
     const dStr = Utilities.formatDate(dCopy, Session.getScriptTimeZone(), 'yyyy-MM-dd');
     const dDisplay = Utilities.formatDate(dCopy, Session.getScriptTimeZone(), 'dd-MM-yyyy');
     const dayName = weekDays[dCopy.getDay()];
-
     const attRow = caches.attByKey[dStr + '|' + String(user.mobile)] || null;
 
-    const resolved = resolveDayStatusFast_(dCopy, dStr, user.mobile, attRow, caches);
-    const status = resolved.status;
+    const isWeeklyOff = isWeeklyOffFast_(dCopy, caches);
+    const holidayName = getHolidayNameFast_(dStr, caches);
+    const isOffDay = isWeeklyOff || !!holidayName;
+    const offLabel = holidayName || (isWeeklyOff ? 'साप्ताहिक सुट्टी' : null);
+    const isLeave = getActiveLeaveForDateFast_(user.mobile, dStr, caches);
+    const hasMorning = !!(attRow && attRow[2]);
+    const hasAfternoon = !!(attRow && attRow[5]);
 
-    let timeInfo = '-';
-    if (attRow && (attRow[2] || attRow[5])) {
-      const mNote = attRow[9] ? ' (' + attRow[9] + ')' : '';
-      const aNote = attRow[10] ? ' (' + attRow[10] + ')' : '';
-      timeInfo = 'सकाळ: ' + (attRow[2] || '-') + mNote + '  |  दुपार: ' + (attRow[5] || '-') + aNote;
+    let rawCategory;
+    if (isOffDay && isLeave) rawCategory = 'leave';       // सुट्टीचा दिवस रजेतही मोडत असेल तर रजा म्हणून मोजा
+    else if (isOffDay) rawCategory = 'offday';              // पुढे सँडविच नियम तपासला जाईल
+    else if (isLeave) rawCategory = 'leave';
+    else if (hasMorning || hasAfternoon) rawCategory = (hasMorning && hasAfternoon) ? 'present' : 'half';
+    else rawCategory = 'absent';
+
+    days.push({ dStr, dDisplay, dayName, attRow, offLabel, hasMorning, rawCategory, finalCategory: rawCategory });
+  }
+
+  // ---- पायरी २: सँडविच नियम — सलग सुट्टीच्या गटाच्या आधी व नंतर दोन्हीकडे
+  // गैरहजर असेल तरच ती संपूर्ण सुट्टी "गैरहजर" म्हणून मोजायची (आधी/नंतर
+  // दोन्हीपैकी एकच गैरहजर असेल तर सुट्टी सुट्टीच राहते). ----
+  let i = 0;
+  while (i < days.length) {
+    if (days[i].rawCategory === 'offday') {
+      let j = i;
+      while (j + 1 < days.length && days[j + 1].rawCategory === 'offday') j++;
+      const beforeAbsent = i > 0 && days[i - 1].rawCategory === 'absent';
+      const afterAbsent = j < days.length - 1 && days[j + 1].rawCategory === 'absent';
+      if (beforeAbsent && afterAbsent) for (let k = i; k <= j; k++) days[k].finalCategory = 'absent';
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+
+  // ---- पायरी ३: प्रत्येक दिवसाची ओळ (row) व एकूण मोजणी ----
+  let rows = '';
+  let presentDays = 0, absentDays = 0, holidayDays = 0, leaveDays = 0;
+
+  days.forEach(day => {
+    const attRow = day.attRow;
+    const morningTimeTxt = day.hasMorning
+      ? formatTimeAmPm_(attRow[2]) + (attRow[9] ? ' (' + attRow[9] + ')' : '') : '-';
+    const afternoonTimeTxt = (attRow && attRow[5])
+      ? formatTimeAmPm_(attRow[5]) + (attRow[10] ? ' (' + attRow[10] + ')' : '') : '-';
+
+    let status, rowStyle = '';
+    switch (day.finalCategory) {
+      case 'present':
+        status = 'पूर्ण हजेरी'; presentDays += 1; break;
+      case 'half':
+        status = day.hasMorning ? 'सकाळची अर्धी हजेरी' : 'दुपारची अर्धी हजेरी'; presentDays += 0.5; break;
+      case 'leave':
+        status = day.offLabel ? ('रजा (सुट्टीच्या दिवशी: ' + day.offLabel + ')') : 'रजा';
+        leaveDays += 1; rowStyle = ' style="background:#faecd2;"'; break;
+      case 'offday':
+        status = 'सुट्टी: ' + (day.offLabel || '');
+        holidayDays += 1; presentDays += 1; // सार्वजनिक/साप्ताहिक सुट्टी हजर दिवसांत मोजली जाते
+        rowStyle = ' style="background:#f6e3e5;"'; break;
+      case 'absent':
+      default:
+        status = day.offLabel ? ('गैरहजर (सुट्टी: ' + day.offLabel + ', आधी-नंतर गैरहजर असल्याने)') : 'गैरहजर';
+        absentDays += 1; break;
     }
 
-    if (resolved.category === 'present') presentDays += 1;
-    else if (resolved.category === 'half') presentDays += 0.5;
-    else if (resolved.category === 'absent') absentDays += 1;
-    else if (resolved.category === 'holiday') holidayDays += 1;
-    else if (resolved.category === 'leave') leaveDays += 1;
+    rows += '<tr' + rowStyle + '><td>' + day.dDisplay + '</td><td>' + day.dayName + '</td><td>' +
+      morningTimeTxt + '</td><td>' + afternoonTimeTxt + '</td><td>' + status + '</td></tr>';
+  });
 
-    const rowStyle = resolved.category === 'holiday' ? ' style="background:#f6e3e5;"'
-      : (resolved.category === 'leave' ? ' style="background:#faecd2;"' : '');
-
-    rows += '<tr' + rowStyle + '><td>' + dDisplay + '</td><td>' + dayName + '</td><td>' + timeInfo + '</td><td>' + status + '</td></tr>';
-  }
+  const totalDays = days.length;
 
   return `
   <div style="font-family: Arial, sans-serif; text-align: center; padding: 20px;">
-    <div style="color: red; font-weight: bold; font-size: 18px;">${appName}</div>
+    <div style="color: red; font-weight: bold; font-size: 26px;">${appName}</div>
     <div style="color: blue; font-weight: bold; font-size: 12px;">${orgAddress}</div>
     <div style="color: red; font-weight: bold; font-size: 14px;">हजेरी पत्रक</div>
-    <div style="color: #111; font-weight: bold; font-size: 12px;">${user.name}</div>
+    <div style="color: #111; font-weight: bold; font-size: 16px; text-align: left; margin-top: 6px;">कर्मचारी: ${user.name}</div>
     <div style="color: #111; font-weight: bold; font-size: 10px;">
       कालावधी: ${Utilities.formatDate(from, Session.getScriptTimeZone(), 'dd-MM-yyyy')}
       ते ${Utilities.formatDate(to, Session.getScriptTimeZone(), 'dd-MM-yyyy')}
@@ -1099,12 +1163,13 @@ function buildEmployeeReportHtml_(user, caches, fromDate, toDate, appName, orgAd
     <hr style="border: 2px solid darkred; margin: 10px 0;">
     <div style="font-size: 10px; margin-bottom: 10px;">प्रिंट तारीख: ${today}</div>
     <table style="width: 100%; border-collapse: collapse; font-size: 11px;" border="1">
-      <thead><tr style="background:#eee;"><th>तारीख</th><th>वार</th><th>वेळ (सकाळ/दुपार)</th><th>हजेरी स्थिती</th></tr></thead>
+      <thead><tr style="background:#eee;"><th>तारीख</th><th>वार</th><th>सकाळची वेळ</th><th>दुपारची वेळ</th><th>हजेरी स्थिती</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div style="margin-top: 15px; font-weight: bold; font-size: 11px;">
-      एकूण हजर दिवस: ${presentDays} &nbsp;&nbsp; गैरहजर: ${absentDays} &nbsp;&nbsp;
-      सुट्टीचे दिवस: ${holidayDays} &nbsp;&nbsp; रजेचे दिवस: ${leaveDays}
+      एकूण दिवस: ${totalDays} &nbsp;&nbsp; एकूण गैरहजर दिवस: ${absentDays} &nbsp;&nbsp;
+      एकूण रजेचे दिवस: ${leaveDays} &nbsp;&nbsp; एकूण सुट्टीचे दिवस: ${holidayDays} &nbsp;&nbsp;
+      एकूण हजर दिवस: ${presentDays}
     </div>
     <div style="display: flex; justify-content: space-between; margin-top: 60px; font-size: 12px;">
       <div>________________________<br>ग्रामपंचायत अधिकारी<br>${officerName}</div>
