@@ -54,6 +54,14 @@ button.primary {
 button.primary:hover { transform: translateY(-1px); box-shadow: 0 5px 14px rgba(217,142,4,0.5); }
 button.primary:active { transform: translateY(0); }
 button.primary:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+/* कर्मचारी नेमून दिलेल्या ठिकाणाच्या त्रिज्येत आल्यावर हजेरी बटण हिरवं होतं —
+   "आता हजेरी नोंदवता येईल" हे लगेच लक्षात यावं म्हणून */
+button.primary.in-range {
+  background: linear-gradient(135deg, var(--green-mid), var(--green-deep));
+  border-color: var(--green-deep);
+  color: var(--paper);
+  box-shadow: 0 3px 10px rgba(31,77,61,0.4);
+}
 button.outline {
   width: 100%; padding: 12px; background: var(--green-pale); border: 2px solid var(--green-deep);
   color: var(--green-deep); border-radius: 12px; font-weight: 700; font-size: 13.5px; cursor: pointer; margin-top: 8px;
