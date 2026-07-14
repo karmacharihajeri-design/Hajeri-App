@@ -96,7 +96,7 @@ let dayStatus = null;
 let assignedLocation = null;
 let hitCount = 0;
 let autoSubmitting = false;
-const STABLE_HITS_NEEDED = 4; // एकत्रित हिट्स (चुकलेल्या फ्रेमने फक्त १ ने कमी होतात, शून्यावर रीसेट होत नाही)
+const STABLE_HITS_NEEDED = 2; // चेहरा जुळल्यावर लगेच (साधारण ०.६ सेकंदात) हजेरी नोंदवली जावी
 
 if (isAssisted) {
   document.getElementById("userNameLbl").textContent = "साहाय्यक हजेरी — मोबाईल: " + mobile;
@@ -146,134 +146,72 @@ function withinWindowNow_(winArr) {
   return nowMin >= (sh * 60 + sm) && nowMin <= (eh * 60 + em);
 }
 
-/** दोन्ही बटणांची सक्रिय/निष्क्रिय स्थिती — वेळ, चेहरा-जुळणी, GPS व
- *  नेमून दिलेल्या ठिकाणाच्या त्रिज्येत आहात का यावर आधारित. त्रिज्येत
- *  असल्यास बटण हिरवं होतं (क्लिक करण्यायोग्य), नसल्यास किती अंतर चालावं
- *  लागेल ते स्पष्टपणे बटणावरच दाखवतं. */
+/** दोन्ही बटणांची सक्रिय/निष्क्रिय स्थिती — वेळ, चेहरा-जुळणी व GPS यावर आधारित */
 function updateButtonStates() {
   if (!dayStatus || dayStatus.dayType !== "working") return;
-  const geo = geofenceStatus_();
 
-  function applySessionState(btn, done, doneLabel, inLabel, winArr) {
-    btn.classList.remove("in-range");
-    if (done) {
-      btn.textContent = doneLabel;
-      btn.disabled = true;
-      return;
-    }
-    const inWindow = withinWindowNow_(winArr);
-    if (!inWindow) {
-      btn.textContent = inLabel + "ची वेळ नाही";
-      btn.disabled = true;
-      return;
-    }
-    if (!currentCoords) {
-      btn.textContent = inLabel + " — GPS मिळत आहे...";
-      btn.disabled = true;
-      return;
-    }
-    if (!geo.ok) {
-      const distTxt = geo.distance !== null ? Math.round(geo.distance) + " मी." : "";
-      btn.textContent = "📍 " + inLabel + " — ठिकाणापासून " + distTxt + " लांब, जवळ जा";
-      btn.disabled = true;
-      return;
-    }
-    if (!faceMatched) {
-      btn.textContent = inLabel + " — चेहरा दाखवा";
-      btn.disabled = true;
-      return;
-    }
-    btn.textContent = inLabel;
-    btn.classList.add("in-range");
-    btn.disabled = false;
+  if (dayStatus.morningDone) {
+    morningBtn.textContent = "✅ सकाळची हजेरी झाली";
+    morningBtn.disabled = true;
+  } else {
+    const inWindow = withinWindowNow_(dayStatus.morningWindow);
+    morningBtn.disabled = !(inWindow && faceMatched && !!currentCoords);
+    morningBtn.textContent = inWindow ? "🌅 सकाळची हजेरी" : "🌅 सकाळच्या हजेरीची वेळ नाही";
   }
 
-  applySessionState(morningBtn, dayStatus.morningDone, "✅ सकाळची हजेरी झाली", "🌅 सकाळची हजेरी", dayStatus.morningWindow);
-  applySessionState(afternoonBtn, dayStatus.afternoonDone, "✅ दुपारची हजेरी झाली", "🌇 दुपारची हजेरी", dayStatus.afternoonWindow);
+  if (dayStatus.afternoonDone) {
+    afternoonBtn.textContent = "✅ दुपारची हजेरी झाली";
+    afternoonBtn.disabled = true;
+  } else {
+    const inWindow = withinWindowNow_(dayStatus.afternoonWindow);
+    afternoonBtn.disabled = !(inWindow && faceMatched && !!currentCoords);
+    afternoonBtn.textContent = inWindow ? "🌇 दुपारची हजेरी" : "🌇 दुपारच्या हजेरीची वेळ नाही";
+  }
 }
 setInterval(updateButtonStates, 15000); // वेळेची कक्षा ओलांडली/सुरू झाली की बटण आपोआप अपडेट व्हावे
 
-let wasWithinGeofence = null; // null = अजून माहीत नाही (आत/बाहेर बदलल्यावरच toast दाखवायचा, पहिल्याच वाचनावर नाही)
-
-/** कर्मचारी नेमून दिलेल्या ठिकाणापासून किती लांब आहे हे स्क्रीनवर लाईव्ह
- *  (सतत अपडेट होत) व तंतोतंत (मीटरपर्यंत अचूक + GPS ची स्वतःची अचूकताही
- *  दाखवून) दाखवते. तसेच कर्मचारी चुकीच्या ठिकाणाहून बरोबर ठिकाणी आला/गेला
- *  (सीमारेषा ओलांडली) की त्याक्षणी वेगळी सूचना (toast) दाखवते. */
-/** सध्याची GPS स्थिती नेमून दिलेल्या ठिकाणाच्या त्रिज्येत आहे का — हे एकाच
- *  ठिकाणी ठरवणारा फंक्शन, जेणेकरून distanceBox व दोन्ही हजेरी-बटणं
- *  (हिरवा रंग/निरोप) दोन्हीकडे सुसंगत राहतील. */
-function geofenceStatus_() {
-  const isOutdoor = document.getElementById("outdoorCheck").checked;
-  if (isOutdoor) return { ok: true, isOutdoor: true, distance: null };
-  if (!assignedLocation || !currentCoords) return { ok: false, isOutdoor: false, distance: null };
-  const dist = distanceMeters(currentCoords.latitude, currentCoords.longitude, assignedLocation.lat, assignedLocation.lon);
-  return { ok: dist <= assignedLocation.radiusMeters, isOutdoor: false, distance: dist, locationName: assignedLocation.name };
-}
-
+/** कर्मचारी नेमून दिलेल्या ठिकाणापासून किती लांब आहे हे स्क्रीनवर लाईव्ह दाखवते */
 function updateDistanceBox() {
   const box = document.getElementById("distanceBox");
   if (!assignedLocation || !currentCoords) { box.style.display = "none"; return; }
 
-  const geo = geofenceStatus_();
+  const isOutdoor = document.getElementById("outdoorCheck").checked;
   box.style.display = "block";
 
-  if (geo.isOutdoor) {
+  if (isOutdoor) {
     box.style.background = "var(--saffron-pale)";
     box.style.color = "#7a5300";
     box.textContent = "📍 कामानिमित्त बाहेर मोड सुरू — अंतराची अट तपासली जाणार नाही";
-    wasWithinGeofence = null; // outdoor मोड बंद केल्यावर परत ताजी सुरुवात व्हावी
     return;
   }
 
-  const accuracyTxt = currentCoords.accuracy ? " (GPS अचूकता ±" + Math.round(currentCoords.accuracy) + " मी.)" : "";
-
-  if (geo.ok) {
+  const dist = distanceMeters(currentCoords.latitude, currentCoords.longitude, assignedLocation.lat, assignedLocation.lon);
+  if (dist <= assignedLocation.radiusMeters) {
     box.style.background = "var(--green-pale)";
     box.style.color = "var(--green-deep)";
-    box.textContent = "✅ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणी आहात — अंतर: " + Math.round(geo.distance) + " मी." + accuracyTxt;
+    box.textContent = "✅ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणी आहात";
   } else {
     box.style.background = "var(--maroon-pale)";
     box.style.color = "var(--maroon)";
-    box.textContent = "⚠️ तुम्ही \"" + assignedLocation.name + "\" पासून " + Math.round(geo.distance) + " मी. लांब आहात — कृपया जवळ जा" + accuracyTxt;
+    box.textContent = "⚠️ तुम्ही \"" + assignedLocation.name + "\" पासून " + Math.round(dist) + " मी. लांब आहात — कृपया जवळ जा";
   }
-
-  // सीमारेषा ओलांडली (आत↔बाहेर बदल) की तात्काळ वेगळी सूचना — पहिल्याच
-  // GPS वाचनावर toast दाखवत नाही (त्या क्षणी already-known स्थितीच असते)
-  if (wasWithinGeofence !== null && wasWithinGeofence !== geo.ok) {
-    if (geo.ok) showToast("✅ आता तुम्ही \"" + assignedLocation.name + "\" या ठरलेल्या ठिकाणी आला आहात");
-    else showToast("⚠️ तुम्ही \"" + assignedLocation.name + "\" या ठिकाणाबाहेर गेला आहात", "err");
-  }
-  wasWithinGeofence = geo.ok;
 }
 
-let gpsWatchId = null;
-
-/** GPS एकदाच मिळवण्याऐवजी सतत (watchPosition) ट्रॅक करते — त्यामुळे
- *  कर्मचारी हलला की अंतर व आत/बाहेर स्थिती आपोआप लाईव्ह अपडेट होते,
- *  बटण दाबून पुन्हा-पुन्हा GPS मागवायची गरज नाही. */
-function tryGetGps() {
+async function tryGetGps() {
   gpsBox.className = "msg ok";
   gpsBox.textContent = "GPS तपासत आहे...";
   document.getElementById("gpsRetryBtn").style.display = "none";
-
-  if (gpsWatchId !== null) stopWatchingPosition(gpsWatchId);
-  wasWithinGeofence = null;
-
-  gpsWatchId = watchPosition(
-    (coords) => {
-      currentCoords = coords;
-      gpsBox.className = "msg ok";
-      gpsBox.textContent = "लोकेशन मिळाले ✓ — लाईव्ह ट्रॅक होत आहे (अचूकता: " + Math.round(coords.accuracy) + " मी.)";
-      document.getElementById("gpsRetryBtn").style.display = "none";
-      updateButtonStates();
-      updateDistanceBox();
-    },
-    (err) => {
-      gpsBox.className = "msg err";
-      gpsBox.textContent = err.message;
-      document.getElementById("gpsRetryBtn").style.display = "block";
-    }
-  );
+  try {
+    const coords = await getCurrentPosition();
+    currentCoords = coords;
+    gpsBox.textContent = "लोकेशन मिळाले ✓ (अचूकता: " + Math.round(coords.accuracy) + " मी.)";
+    updateButtonStates();
+    updateDistanceBox();
+  } catch (e) {
+    gpsBox.className = "msg err";
+    gpsBox.textContent = e.message;
+    document.getElementById("gpsRetryBtn").style.display = "block";
+  }
 }
 
 async function tryStartCamera() {
@@ -294,13 +232,9 @@ async function tryStartCamera() {
 document.getElementById("gpsRetryBtn").onclick = tryGetGps;
 document.getElementById("camRetryBtn").onclick = tryStartCamera;
 
-// पान बंद होताना/सोडताना लाईव्ह GPS ट्रॅकिंग थांबवा — बॅटरी वाचते
-window.addEventListener("pagehide", () => { if (gpsWatchId !== null) stopWatchingPosition(gpsWatchId); });
-
 document.getElementById("outdoorCheck").onchange = (e) => {
   document.getElementById("outdoorReasonWrap").style.display = e.target.checked ? "block" : "none";
   updateDistanceBox();
-  updateButtonStates();
 };
 
 async function init() {
@@ -333,21 +267,9 @@ async function detectLoop() {
     faceMatched = match;
     if (match) {
       hitCount = Math.min(STABLE_HITS_NEEDED, hitCount + 1);
-      if (hitCount >= STABLE_HITS_NEEDED) {
-        // चेहरा पुरेसा स्थिर जुळला — पण खरोखर नोंदवलं जाणार आहे का, ते
-        // सध्याच्या सत्र-वेळेवर अवलंबून आहे. उगाच "नोंदवत आहे..." दाखवून
-        // कर्मचाऱ्याला विनाकारण थांबवून ठेवू नये — नेमकं कारण सांगावं.
-        const availableSession = getAvailableSession_();
-        if (availableSession) {
-          faceStatus.textContent = "चेहरा जुळला ✓ — हजेरी नोंदवत आहे...";
-        } else if (dayStatus && dayStatus.morningDone && dayStatus.afternoonDone) {
-          faceStatus.textContent = "चेहरा जुळला ✓ — आजची दोन्ही सत्रांची हजेरी आधीच झाली आहे";
-        } else {
-          faceStatus.textContent = "चेहरा जुळला ✓ — पण सध्या कोणत्याही सत्राची हजेरीची वेळ नाही";
-        }
-      } else {
-        faceStatus.textContent = "चेहरा जुळला ✓ — स्थिर रहा...";
-      }
+      faceStatus.textContent = hitCount >= STABLE_HITS_NEEDED
+        ? "चेहरा जुळला ✓ — हजेरी नोंदवत आहे..."
+        : "चेहरा जुळला ✓ — स्थिर रहा...";
       faceStatus.className = "face-status face-ok";
     } else {
       hitCount = Math.max(0, hitCount - 1); // एखादी फ्रेम चुकली तरी पूर्ण प्रगती वाया जाऊ नये
@@ -365,29 +287,20 @@ async function detectLoop() {
   setTimeout(detectLoop, 300);
 }
 
-/** सध्याच्या क्षणी कोणत्या सत्राची हजेरी शक्य आहे — कोणतंही नसेल तर null.
- *  detectLoop (स्टेटस मजकूरासाठी) व maybeAutoSubmit दोन्हीकडून वापरलं जातं,
- *  जेणेकरून दोन्ही ठिकाणी एकच लॉजिक राहील. */
-function getAvailableSession_() {
-  if (!dayStatus || dayStatus.dayType !== "working") return null;
-  if (!dayStatus.morningDone && withinWindowNow_(dayStatus.morningWindow)) return "morning";
-  if (!dayStatus.afternoonDone && withinWindowNow_(dayStatus.afternoonWindow)) return "afternoon";
-  return null;
-}
-
 /** चेहरा स्थिर जुळला, वेळ योग्य आहे, GPS मिळालाय — तर बटण न दाबताच आपोआप
  *  त्या सत्राची हजेरी नोंदवते. (Outdoor Duty निवडलेलं असल्यास आधी कारण
  *  लिहिणं आवश्यक — रिकामं असेपर्यंत आपोआप पाठवलं जात नाही.) */
 function maybeAutoSubmit() {
-  if (autoSubmitting || !currentCoords) return;
+  if (autoSubmitting || !dayStatus || dayStatus.dayType !== "working" || !currentCoords) return;
   if (hitCount < STABLE_HITS_NEEDED) return;
 
   const isOutdoor = document.getElementById("outdoorCheck").checked;
   const outdoorReason = document.getElementById("outdoorReasonInput").value.trim();
   if (isOutdoor && !outdoorReason) return;
-  if (!geofenceStatus_().ok) return; // नेमून दिलेल्या ठिकाणाच्या त्रिज्येबाहेर असेपर्यंत आपोआप पाठवू नये
 
-  const sessionToTry = getAvailableSession_();
+  let sessionToTry = null;
+  if (!dayStatus.morningDone && withinWindowNow_(dayStatus.morningWindow)) sessionToTry = "morning";
+  else if (!dayStatus.afternoonDone && withinWindowNow_(dayStatus.afternoonWindow)) sessionToTry = "afternoon";
   if (!sessionToTry) return;
 
   hitCount = 0;

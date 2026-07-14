@@ -22,9 +22,6 @@
     <input type="date" id="fromDate">
     <label>To तारीख</label>
     <input type="date" id="toDate">
-    <p id="futureDateWarn" style="display:none;font-size:11px;color:var(--maroon);margin:6px 0 0;">
-      ⚠️ आजच्या तारखेपुढील तारीख निवडता येणार नाही
-    </p>
 
     <label>कोणासाठी?</label>
     <select id="targetSelect">
@@ -65,28 +62,6 @@ document.getElementById("targetSelect").onchange = (e) => {
   document.getElementById("mobileFieldWrap").style.display =
     e.target.value === "single" ? "block" : "none";
 };
-
-// आजच्या तारखेपुढील तारीख निवडता येऊ नये — From व To दोन्ही फील्ड्सवर
-// max = आजची तारीख सेट करतो (कॅलेंडर पिकरमध्येच पुढच्या तारखा दिसणार
-// नाहीत/निवडता येणार नाहीत). काही जुने ब्राउझर max कडे दुर्लक्ष करू
-// शकतात, म्हणून change वेळीही तपासून स्वयंचलित सुधारतो.
-(function restrictFutureDates_() {
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const fromInput = document.getElementById("fromDate");
-  const toInput = document.getElementById("toDate");
-  const warnLbl = document.getElementById("futureDateWarn");
-  [fromInput, toInput].forEach(inp => inp.setAttribute("max", todayStr));
-
-  function clampIfFuture_(inp) {
-    if (inp.value && inp.value > todayStr) {
-      inp.value = todayStr;
-      warnLbl.style.display = "block";
-      setTimeout(() => { warnLbl.style.display = "none"; }, 3000);
-    }
-  }
-  fromInput.addEventListener("change", () => clampIfFuture_(fromInput));
-  toInput.addEventListener("change", () => clampIfFuture_(toInput));
-})();
 
 let lastPdfBlob = null;
 let lastPdfFileName = "hajeri-patrak.pdf";
